@@ -1,0 +1,29 @@
+[package]
+name = "em-bindgen"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["fetch"]
+asyncify = []
+fetch = ["dep:http"]
+
+[dependencies]
+bitflags = "2.5.0"
+docfg = "0.1.0"
+ffi-closure = "1.1.0"
+http = { version = "1.1.0", optional = true }
+pin-project = "1.1.5"
+semver = "1.0.23"
+utils-atomics = { version = "1.1.2", features = ["futures"] }
+
+[build-dependencies]
+bindgen = "0.69.4"
+color-eyre = "0.6.3"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[workspace]
+members = ["examples"]
