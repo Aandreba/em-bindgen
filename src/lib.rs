@@ -1,8 +1,5 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[cfg(not(all(target_family = "wasm", target_os = "emscripten")))]
-compile_error!("This library is only supported on Emscripten WebAssembly targets");
-
 use docfg::docfg;
 use semver::Version;
 use std::{
@@ -14,6 +11,10 @@ use std::{
 #[cfg(feature = "fetch")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fetch")))]
 pub mod fetch;
+pub mod future;
+#[cfg(feature = "proxying")]
+#[cfg_attr(docsrs, doc(cfg(feature = "proxying")))]
+pub mod proxying;
 
 pub const EMSCRIPTEN_VERSION: Version = Version::new(
     sys::__EMSCRIPTEN_major__ as u64,
@@ -39,6 +40,18 @@ impl From<Duration> for Timing {
     fn from(value: Duration) -> Self {
         Self::SetTimeout(value)
     }
+}
+
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_async_call)
+#[doc(alias = "emscripten_async_call")]
+pub fn set_timeout<F: 'static + FnOnce()>(dur: Duration, f: F) {
+    unsafe extern "C" fn timeout<F: FnOnce()>(arg: *mut c_void) {
+        Box::from_raw(arg.cast::<F>())()
+    }
+
+    let millis = c_int::try_from(dur.as_millis()).unwrap_or(c_int::MAX);
+    let arg = Box::into_raw(Box::new(f));
+    unsafe { sys::emscripten_async_call(Some(timeout::<F>), arg.cast(), millis) }
 }
 
 /// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_set_main_loop)
@@ -101,7 +114,7 @@ pub fn set_main_loop_timing(timing: Timing) {
     }
 }
 
-// https://godbolt.org/z/a1ac8o4vh
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_sleep)
 #[docfg(feature = "asyncify")]
 #[doc(alias = "emscripten_sleep")]
 pub fn sleep(dur: std::time::Duration) {
@@ -121,8 +134,9 @@ pub fn sleep(dur: std::time::Duration) {
     }
 }
 
-#[inline]
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_get_compiler_setting)
 #[doc(alias = "emscripten_get_compiler_setting")]
+#[inline]
 pub fn get_compiler_setting(name: &CStr) -> c_long {
     return unsafe { sys::emscripten_get_compiler_setting(name.as_ptr()) };
 }
@@ -132,7 +146,35 @@ pub mod sys {
     #![allow(non_camel_case_types)]
     #![allow(non_snake_case)]
 
+    use std::os::unix::thread::JoinHandleExt;
+    pub use std::os::unix::thread::RawPthread as pthread_t;
+
     include!(concat!(env!("OUT_DIR"), "/emscripten.rs"));
+
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub(crate) struct PthreadWrapper(pub pthread_t);
+
+    impl PthreadWrapper {
+        pub fn current() -> Self {
+            return Self(unsafe { libc::pthread_self() });
+        }
+    }
+
+    impl JoinHandleExt for PthreadWrapper {
+        #[inline]
+        fn as_pthread_t(&self) -> std::os::unix::thread::RawPthread {
+            self.into_pthread_t()
+        }
+
+        #[inline]
+        fn into_pthread_t(self) -> std::os::unix::thread::RawPthread {
+            self.0
+        }
+    }
+
+    unsafe impl Send for PthreadWrapper {}
+    unsafe impl Sync for PthreadWrapper {}
 }
 
 // pub mod glue {

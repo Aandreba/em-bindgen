@@ -1,6 +1,12 @@
-#include <emscripten/val.h>
-#include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-typedef struct {
-  _Alignas(alignof(emscripten::val)) uint8_t inner[sizeof(emscripten::val)];
-} js_value_t;
+typedef struct _EM_VAL *GLUE_EM_VAL;
+
+GLUE_EM_VAL glue_get_global(const char *name);
+void glue_destroy_value(GLUE_EM_VAL obj);
+
+#ifdef __cplusplus
+}
+#endif

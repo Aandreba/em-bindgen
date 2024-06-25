@@ -15,8 +15,8 @@ pub fn main() {
     let include = sysroot.join("include");
 
     std::thread::scope(|s| {
-        s.spawn(|| build_bindings(s, &include, &sysroot, &out_dir));
-        // s.spawn(|| build_glue(s, &sysroot, &include, &out_dir));
+        build_bindings(s, &include, &sysroot, &out_dir);
+        // s.spawn(|| build_glue(&emscripten));
     });
 }
 
@@ -31,10 +31,11 @@ fn build_bindings<'scope, 'env>(
     let funcs = s.spawn(|| {
         let mut em_builder = builder()
             .header(include.join("emscripten.h").display().to_string())
+            // .header("glue.h")
             .clang_arg("--target=x86_64-linux")
             .clang_arg(format!("--sysroot={}", sysroot.display()))
             .blocklist_type(".*")
-            .allowlist_function("emscripten_.*")
+            .allowlist_function("(emscripten|em|glue)_.*")
             .default_enum_style(bindgen::EnumVariation::Rust {
                 non_exhaustive: true,
             })
@@ -43,6 +44,11 @@ fn build_bindings<'scope, 'env>(
 
         if std::env::var_os("CARGO_FEATURE_FETCH").is_some() {
             em_builder = em_builder.header(include.join("emscripten/fetch.h").display().to_string())
+        }
+
+        if std::env::var_os("CARGO_FEATURE_PROXYING").is_some() {
+            em_builder =
+                em_builder.header(include.join("emscripten/proxying.h").display().to_string())
         }
 
         let mut dst = Vec::new();
@@ -58,9 +64,14 @@ fn build_bindings<'scope, 'env>(
     let types = s.spawn(|| {
         let mut em_builder = builder()
             .header(include.join("emscripten.h").display().to_string())
+            // .header("glue.h")
             .clang_arg(format!("--sysroot={}", sysroot.display()))
-            .allowlist_file(format!("{}.*", include.join("emscripten/").display()))
+            .allowlist_file(format!(
+                "(.*glue.h|{}.*)",
+                include.join("emscripten/").display()
+            ))
             .blocklist_function(".*")
+            .blocklist_type("pthread_t")
             .default_enum_style(bindgen::EnumVariation::Rust {
                 non_exhaustive: true,
             })
@@ -69,6 +80,11 @@ fn build_bindings<'scope, 'env>(
 
         if std::env::var_os("CARGO_FEATURE_FETCH").is_some() {
             em_builder = em_builder.header(include.join("emscripten/fetch.h").display().to_string())
+        }
+
+        if std::env::var_os("CARGO_FEATURE_PROXYING").is_some() {
+            em_builder =
+                em_builder.header(include.join("emscripten/proxying.h").display().to_string())
         }
 
         let mut dst = Vec::new();
@@ -90,28 +106,12 @@ fn build_bindings<'scope, 'env>(
     // );
 }
 
-fn build_glue<'scope, 'env>(
-    s: &'scope Scope<'scope, 'env>,
-    sysroot: &'env Path,
-    include: &'env Path,
-    out_dir: &'env Path,
-) {
-    // TODO Compile and link
-
-    // Generate bindings
-    s.spawn(|| {
-        builder()
-            .header("glue.h")
-            .clang_args(["-xc++", "-std=c++20"])
-            .clang_arg(format!("--sysroot={}", sysroot.display()))
-            // .clang_arg(format!("-I{}", include.display()))
-            .default_enum_style(bindgen::EnumVariation::Rust {
-                non_exhaustive: true,
-            })
-            .generate_cstr(true)
-            .generate()
-            .expect("Error generating emscripten bindings")
-            .write_to_file(out_dir.join("glue.rs"))
-            .unwrap();
-    });
+fn build_glue(emscripten: &Path) {
+    cc::Build::new()
+        .file("glue.cpp")
+        .compiler(emscripten.join(match cfg!(windows) {
+            true => "emcc.bat",
+            false => "emcc",
+        }))
+        .compile("glue");
 }

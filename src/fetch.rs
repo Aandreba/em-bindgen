@@ -1,20 +1,24 @@
 use crate::sys::{self, emscripten_fetch_attr_t, emscripten_fetch_t};
 use bitflags::bitflags;
-use http::{Method, StatusCode};
+use http::{Method, Response, StatusCode};
 use std::{
-    ffi::{c_char, CStr},
+    ffi::{c_char, c_void, CStr},
     marker::PhantomData,
     mem::MaybeUninit,
+    ops::Deref,
     time::Duration,
 };
+use utils_atomics::flag::mpsc::{async_flag, AsyncFlag};
 
 pub struct Builder<'a> {
+    url: &'a CStr,
     attrs: emscripten_fetch_attr_t,
+    headers: Vec<*const c_char>,
     _phtm: PhantomData<&'a mut &'a ()>,
 }
 
 impl<'a> Builder<'a> {
-    pub fn new(method: Method) -> Self {
+    pub fn new(method: Method, url: &'a CStr) -> Self {
         let mut attrs = {
             let mut this = MaybeUninit::uninit();
             unsafe {
@@ -31,6 +35,8 @@ impl<'a> Builder<'a> {
 
         return Self {
             attrs,
+            url,
+            headers: Vec::new(),
             _phtm: PhantomData,
         };
     }
@@ -45,6 +51,13 @@ impl<'a> Builder<'a> {
         self
     }
 
+    pub fn header(mut self, name: &'a CStr, value: &'a CStr) -> Self {
+        self.headers.reserve(2);
+        self.headers.push(name.as_ptr());
+        self.headers.push(value.as_ptr());
+        self
+    }
+
     pub fn mime_type(mut self, mime: Option<&'a CStr>) -> Self {
         self.attrs.overriddenMimeType = match mime {
             Some(mime) => mime.as_ptr(),
@@ -53,66 +66,65 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn send<H: FetchHandler>(mut self, url: &'a CStr, handler: H) {
-        unsafe extern "C" fn on_success<H: FetchHandler>(fetch: *mut emscripten_fetch_t) {
-            let _guard = CloseGuard(fetch);
-            let (fetch, user_data) = Fetch::from_raw::<H>(fetch);
-            let this = Box::from_raw(user_data);
-            this.on_success(fetch)
+    pub fn body(mut self, body: &'a [u8]) -> Self {
+        self.attrs.requestData = body.as_ptr().cast();
+        self.attrs.requestDataSize = body.len();
+        self
+    }
+
+    pub async fn send(mut self) -> http::Result<Response<ResponseBody>> {
+        unsafe extern "C" fn on_success(fetch: *mut emscripten_fetch_t) {
+            let fetch = &mut *fetch;
+            let handler = AsyncFlag::from_raw(fetch.userData.cast());
+            handler.mark();
         }
 
-        unsafe extern "C" fn on_error<H: FetchHandler>(fetch: *mut emscripten_fetch_t) {
-            let _guard = CloseGuard(fetch);
-            let (fetch, user_data) = Fetch::from_raw::<H>(fetch);
-            let this = Box::from_raw(user_data);
-            this.on_error(fetch)
+        unsafe extern "C" fn on_error(fetch: *mut emscripten_fetch_t) {
+            let fetch = &mut *fetch;
+            let handler = AsyncFlag::from_raw(fetch.userData.cast());
+            handler.mark();
         }
+
+        let (send, recv) = async_flag();
+        self.headers.push(std::ptr::null());
 
         self.attrs.attributes |= sys::EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-        self.attrs.onsuccess = Some(on_success::<H>);
-        self.attrs.onerror = Some(on_error::<H>);
-        self.attrs.userData = Box::into_raw(Box::new(handler)).cast();
+        self.attrs.requestHeaders = self.headers.as_ptr();
+        self.attrs.userData = unsafe { send.into_raw() as *mut c_void };
+        self.attrs.onsuccess = Some(on_success);
+        self.attrs.onerror = Some(on_error);
 
         unsafe {
-            sys::emscripten_fetch(&mut self.attrs, url.as_ptr());
+            let fetch = sys::emscripten_fetch(&mut self.attrs, self.url.as_ptr());
+            assert!(!fetch.is_null());
+
+            let fetch = &mut *fetch;
+            let guard = CloseGuard(fetch);
+            recv.await;
+
+            let mut response = Response::builder().status(StatusCode::from_u16(fetch.status)?);
+
+            // Read & unpack headers
+            let mut header_len = sys::emscripten_fetch_get_response_headers_length(fetch) + 1;
+            let mut headers = Vec::<u8>::with_capacity(header_len);
+            header_len = sys::emscripten_fetch_get_response_headers(
+                fetch,
+                headers.as_mut_ptr().cast(),
+                header_len,
+            );
+            headers.set_len(header_len);
+
+            let mut remaining_header = headers.as_slice();
+            while let Some(idx) = memchr::memchr(b'\n', remaining_header) {
+                let (header, rem) = remaining_header.split_at(idx);
+                remaining_header = &rem[1..];
+                let delim = memchr::memchr(b':', header).unwrap_or(header.len());
+                let (name, value) = header.split_at(delim);
+                response = response.header(name, &value[1..]);
+            }
+
+            return response.body(ResponseBody { inner: guard });
         }
-    }
-
-    pub fn send_streaming<H: FetchHandler>(mut self, url: &'a CStr, handler: H) {
-        todo!()
-    }
-}
-
-pub struct Fetch<'a> {
-    pub id: u32,
-    pub url: &'a CStr,
-    pub data: Option<&'a [u8]>,
-    pub data_offset: u64,
-    pub total_bytes: u64,
-    pub status: StatusCode,
-}
-
-impl<'a> Fetch<'a> {
-    pub unsafe fn from_raw<T>(fetch: *mut emscripten_fetch_t) -> (Self, *mut T) {
-        let fetch = &*fetch;
-        return (
-            Self {
-                id: fetch.id,
-                url: CStr::from_ptr(fetch.url),
-                data: if fetch.data.is_null() {
-                    None
-                } else {
-                    Some(std::slice::from_raw_parts(
-                        fetch.data.cast(),
-                        usize::try_from(fetch.numBytes).unwrap(),
-                    ))
-                },
-                data_offset: fetch.dataOffset,
-                total_bytes: fetch.totalBytes,
-                status: StatusCode::from_u16(fetch.status).unwrap(),
-            },
-            fetch.userData.cast(),
-        );
     }
 }
 
@@ -131,13 +143,24 @@ bitflags! {
     }
 }
 
-pub trait FetchHandler {
-    fn on_success(self, fetch: Fetch);
-    fn on_error(self, fetch: Fetch);
+#[repr(transparent)]
+pub struct ResponseBody {
+    inner: CloseGuard,
 }
 
-pub trait FetchProgressHandler: FetchHandler {
-    fn on_progress<'a>(&'a mut self, fetch: &mut Fetch<'a>);
+impl Deref for ResponseBody {
+    type Target = [u8];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            let fetch = &*self.inner.0;
+            std::slice::from_raw_parts(
+                fetch.data.cast(),
+                usize::try_from(fetch.numBytes).unwrap_or(usize::MAX),
+            )
+        }
+    }
 }
 
 #[repr(transparent)]
