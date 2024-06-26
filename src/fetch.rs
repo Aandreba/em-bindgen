@@ -1,8 +1,9 @@
 use crate::sys::{self, emscripten_fetch_attr_t, emscripten_fetch_t};
 use bitflags::bitflags;
-use http::{Method, Response, StatusCode};
+use http::{HeaderName, HeaderValue, Method, Response, StatusCode};
 use std::{
     ffi::{c_char, c_void, CStr},
+    fmt::Debug,
     marker::PhantomData,
     mem::MaybeUninit,
     ops::Deref,
@@ -115,12 +116,21 @@ impl<'a> Builder<'a> {
             headers.set_len(header_len);
 
             let mut remaining_header = headers.as_slice();
-            while let Some(idx) = memchr::memchr(b'\n', remaining_header) {
+            while let Some(mut idx) = memchr::memchr(b'\n', remaining_header) {
+                if remaining_header.get(idx + 1).is_some_and(|x| *x == b'\r') {
+                    idx += 1;
+                }
+
                 let (header, rem) = remaining_header.split_at(idx);
+                let header = &header[..header.len() - 1];
+
                 remaining_header = &rem[1..];
                 let delim = memchr::memchr(b':', header).unwrap_or(header.len());
+
                 let (name, value) = header.split_at(delim);
-                response = response.header(name, &value[1..]);
+                let value = trim_ascii_start(&value[1..]);
+
+                response = response.header(name, value);
             }
 
             return response.body(ResponseBody { inner: guard });
@@ -148,6 +158,13 @@ pub struct ResponseBody {
     inner: CloseGuard,
 }
 
+impl Debug for ResponseBody {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(self.deref(), f)
+    }
+}
+
 impl Deref for ResponseBody {
     type Target = [u8];
 
@@ -171,4 +188,17 @@ impl Drop for CloseGuard {
     fn drop(&mut self) {
         unsafe { sys::emscripten_fetch_close(self.0) };
     }
+}
+
+const fn trim_ascii_start(mut bytes: &[u8]) -> &[u8] {
+    // Note: A pattern matching based approach (instead of indexing) allows
+    // making the function const.
+    while let [first, rest @ ..] = bytes {
+        if first.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
 }

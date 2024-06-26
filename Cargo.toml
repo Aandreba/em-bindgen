@@ -12,7 +12,7 @@ proxying = ["dep:futures"]
 [dependencies]
 bitflags = "2.5.0"
 docfg = "0.1.0"
-futures = { version = "0.3.30", features = ["executor"], optional = true }
+futures = { version = "0.3.30", features = ["executor", "thread-pool"], optional = true }
 http = { version = "1.1.0", optional = true }
 libc = "0.2.155"
 memchr = "2.7.4"

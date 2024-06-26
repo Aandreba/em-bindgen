@@ -5,8 +5,8 @@ use crate::{
 };
 use docfg::docfg;
 use futures::{
-    executor::LocalPool,
-    task::{LocalFutureObj, LocalSpawn, LocalSpawnExt},
+    executor::{LocalPool, ThreadPool},
+    task::{FutureObj, LocalFutureObj, LocalSpawn, LocalSpawnExt},
 };
 use pin_project::pin_project;
 use std::{
@@ -17,8 +17,8 @@ use std::{
     mem::ManuallyDrop,
     ops::Deref,
     rc::Rc,
-    sync::{Arc, Weak},
-    task::{Context, Poll, Waker},
+    sync::{Arc, OnceLock, Weak},
+    task::{Context, Waker},
     time::Duration,
 };
 use utils_atomics::{
@@ -33,7 +33,10 @@ pub async fn sleep(dur: Duration) {
 }
 
 #[docfg(all(feature = "asyncify", feature = "proxying"))]
-pub fn block_on<Fut: Future>(fut: Fut) -> Fut::Output {
+pub fn block_on<Fut>(fut: Fut) -> Fut::Output
+where
+    Fut: Future,
+{
     thread_local! {
         static CURRENT_EVENT: Cell<Option<Event<Inner>>> = Cell::new(None);
     }
@@ -81,7 +84,11 @@ pub fn block_on<Fut: Future>(fut: Fut) -> Fut::Output {
 }
 
 #[docfg(feature = "proxying")]
-pub fn spawn_local<Fut: 'static + Future>(fut: Fut) -> JoinHandle<Fut::Output> {
+pub fn spawn_local<Fut>(fut: Fut) -> JoinHandle<Fut::Output>
+where
+    Fut: 'static + Future,
+    Fut::Output: 'static,
+{
     #[pin_project]
     struct Task<Fut> {
         #[pin]
