@@ -1,9 +1,11 @@
+#[cfg(feature = "proxying")]
+use crate::proxying::Queue;
 use crate::{
-    proxying::Queue,
     set_timeout,
     sys::{self, em_promise_t, PthreadWrapper},
 };
 use docfg::docfg;
+#[cfg(feature = "proxying")]
 use futures::{
     executor::{LocalPool, ThreadPool},
     task::{FutureObj, LocalFutureObj, LocalSpawn, LocalSpawnExt},
