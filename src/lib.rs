@@ -8,17 +8,6 @@ use std::{
     time::Duration,
 };
 
-#[doc(inline)]
-pub use sys::emscripten_cancel_main_loop as cancel_main_loop;
-#[doc(inline)]
-pub use sys::emscripten_get_device_pixel_ratio as get_device_pixel_ratio;
-#[doc(inline)]
-pub use sys::emscripten_get_now as get_now;
-#[doc(inline)]
-pub use sys::emscripten_hide_mouse as hide_mouse;
-#[doc(inline)]
-pub use sys::emscripten_random as random;
-
 #[cfg(feature = "fetch")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fetch")))]
 pub mod fetch;
@@ -32,6 +21,13 @@ pub const EMSCRIPTEN_VERSION: Version = Version::new(
     sys::__EMSCRIPTEN_minor__ as u64,
     sys::__EMSCRIPTEN_tiny__ as u64,
 );
+
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_cancel_main_loop)
+#[doc(alias = "emscripten_cancel_main_loop")]
+#[inline]
+pub fn cancel_main_loop() {
+    unsafe { sys::emscripten_cancel_main_loop() }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Timing {
