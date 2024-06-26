@@ -8,6 +8,17 @@ use std::{
     time::Duration,
 };
 
+#[doc(inline)]
+pub use sys::emscripten_cancel_main_loop as cancel_main_loop;
+#[doc(inline)]
+pub use sys::emscripten_get_device_pixel_ratio as get_device_pixel_ratio;
+#[doc(inline)]
+pub use sys::emscripten_get_now as get_now;
+#[doc(inline)]
+pub use sys::emscripten_hide_mouse as hide_mouse;
+#[doc(inline)]
+pub use sys::emscripten_random as random;
+
 #[cfg(feature = "fetch")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fetch")))]
 pub mod fetch;
