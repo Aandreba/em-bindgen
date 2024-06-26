@@ -105,13 +105,3 @@ fn build_bindings<'scope, 'env>(
     //     std::fs::read_to_string(out_dir.join("emscripten.rs")).unwrap()
     // );
 }
-
-fn build_glue(emscripten: &Path) {
-    cc::Build::new()
-        .file("glue.cpp")
-        .compiler(emscripten.join(match cfg!(windows) {
-            true => "emcc.bat",
-            false => "emcc",
-        }))
-        .compile("glue");
-}
