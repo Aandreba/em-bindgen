@@ -7,20 +7,22 @@ use crate::{
 use docfg::docfg;
 #[cfg(feature = "proxying")]
 use futures::{
-    executor::{LocalPool, ThreadPool},
+    executor::LocalPool,
     task::{FutureObj, LocalFutureObj, LocalSpawn, LocalSpawnExt},
 };
 use pin_project::pin_project;
 use std::{
+    any::Any,
     cell::{Cell, RefCell},
     ffi::c_void,
     future::Future,
     marker::PhantomData,
     mem::ManuallyDrop,
     ops::Deref,
+    pin::Pin,
     rc::Rc,
     sync::{Arc, OnceLock, Weak},
-    task::{Context, Waker},
+    task::{ready, Context, Poll, Waker},
     time::Duration,
 };
 use utils_atomics::{
@@ -182,9 +184,13 @@ where
         }
 
         pub fn spawn<Fut: 'static + Future>(&self, fut: Fut) -> JoinHandle<Fut::Output> {
+            use futures::FutureExt;
+            use std::panic::AssertUnwindSafe;
+
             let (send, recv) = async_channel();
-            self.tasks
-                .push(&self.queue, async move { send.send(fut.await) });
+            self.tasks.push(&self.queue, async move {
+                send.send(AssertUnwindSafe(fut).catch_unwind().await)
+            });
             self.enqueue();
             return JoinHandle { recv };
         }
@@ -219,7 +225,36 @@ where
 }
 
 pub struct JoinHandle<T> {
-    recv: AsyncReceiver<T>,
+    pub(crate) recv: AsyncReceiver<Result<T, Box<dyn Any + Send + 'static>>>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum JoinError {
+    #[error("The task was aborted")]
+    Aborted,
+    #[error("The task panicked")]
+    Panic(Box<dyn Any + Send + 'static>),
+}
+
+impl<T> JoinHandle<T> {
+    pub fn abort(self) {
+        todo!()
+    }
+}
+
+impl<T> Future for JoinHandle<T> {
+    type Output = Result<T, JoinError>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        return Poll::Ready(match ready!(Pin::new(&mut self.recv).poll(cx)) {
+            Some(Ok(val)) => Ok(val),
+            Some(Err(e)) => Err(JoinError::Panic(e)),
+            None => Err(JoinError::Aborted),
+        });
+    }
 }
 
 fn event<T>() -> (Event<T>, Promise<T>) {

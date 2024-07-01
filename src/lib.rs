@@ -5,6 +5,7 @@ use semver::Version;
 use std::{
     ffi::{c_int, c_long, c_void, CStr},
     num::NonZeroU32,
+    ops::Deref,
     time::Duration,
 };
 
@@ -12,6 +13,9 @@ use std::{
 #[cfg_attr(docsrs, doc(cfg(feature = "fetch")))]
 pub mod fetch;
 pub mod future;
+#[cfg(feature = "html")]
+#[cfg_attr(docsrs, doc(cfg(feature = "html")))]
+pub mod html;
 #[cfg(feature = "proxying")]
 #[cfg_attr(docsrs, doc(cfg(feature = "proxying")))]
 pub mod proxying;
@@ -83,16 +87,18 @@ pub fn set_main_loop<F: FnMut()>(mut f: F, timing: Option<Timing>, simulate_infi
                 f();
             };
 
+            let mut f = Box::new(f);
             sys::emscripten_set_main_loop_arg(
-                Some(main_loop_of(&f)),
-                std::ptr::addr_of_mut!(f).cast(),
+                Some(main_loop_of(f.deref())),
+                std::ptr::addr_of_mut!(*f).cast(),
                 0,
                 simulate_infinite_loop as c_int,
             );
         } else {
+            let mut f = Box::new(f);
             sys::emscripten_set_main_loop_arg(
                 Some(main_loop::<F>),
-                std::ptr::addr_of_mut!(f).cast(),
+                std::ptr::addr_of_mut!(*f).cast(),
                 0,
                 simulate_infinite_loop as c_int,
             );

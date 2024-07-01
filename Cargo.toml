@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-# default = ["asyncify", "proxying"]
+# default = ["html"]
+default = ["html", "asyncify", "proxying"]
 asyncify = []
 fetch = ["dep:http"]
-proxying = ["dep:futures"]
+proxying = []
+html = []
 
 [dependencies]
 bitflags = "2.5.0"
 docfg = "0.1.0"
-futures = { version = "0.3.30", features = ["executor", "thread-pool"], optional = true }
+futures = { version = "0.3.30", features = ["executor"] }
 http = { version = "1.1.0", optional = true }
 libc = "0.2.155"
 memchr = "2.7.4"
@@ -30,4 +32,4 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace]
-members = ["examples"]
+members = ["examples", "macros"]

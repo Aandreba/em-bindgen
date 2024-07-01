@@ -42,6 +42,10 @@ fn build_bindings<'scope, 'env>(
             .generate_cstr(true)
             .layout_tests(false);
 
+        if std::env::var_os("CARGO_FEATURE_HTML").is_some() {
+            em_builder = em_builder.header(include.join("emscripten/html5.h").display().to_string())
+        }
+
         if std::env::var_os("CARGO_FEATURE_FETCH").is_some() {
             em_builder = em_builder.header(include.join("emscripten/fetch.h").display().to_string())
         }
@@ -77,6 +81,10 @@ fn build_bindings<'scope, 'env>(
             })
             .generate_cstr(true)
             .layout_tests(false);
+
+        if std::env::var_os("CARGO_FEATURE_HTML").is_some() {
+            em_builder = em_builder.header(include.join("emscripten/html5.h").display().to_string())
+        }
 
         if std::env::var_os("CARGO_FEATURE_FETCH").is_some() {
             em_builder = em_builder.header(include.join("emscripten/fetch.h").display().to_string())
