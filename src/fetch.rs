@@ -1,6 +1,6 @@
 use crate::sys::{self, emscripten_fetch_attr_t, emscripten_fetch_t};
 use bitflags::bitflags;
-use http::{HeaderName, HeaderValue, Method, Response, StatusCode};
+use http::{Method, Response, StatusCode};
 use std::{
     ffi::{c_char, c_void, CStr},
     fmt::Debug,

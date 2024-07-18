@@ -1,3 +1,4 @@
+#[allow(unused_macros)]
 macro_rules! tri {
     ($e:expr) => {
         match $e {

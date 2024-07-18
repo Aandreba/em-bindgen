@@ -25,7 +25,7 @@ impl JsValue {
     };
 
     pub fn from_str(s: impl Into<String>) -> Result<JsValue, NulError> {
-        let cstr = CString::new(s.into());
+        let cstr = CString::new(s.into())?;
         return unsafe { Ok(JsValue::from_utf8_c_str(&cstr)) };
     }
 
@@ -139,6 +139,8 @@ impl Drop for JsValue {
 
 mod val_sys {
     #![allow(non_camel_case_types)]
+    #![allow(unused)]
+
     use std::ffi::*;
 
     macro_rules! opaque {

@@ -8,7 +8,7 @@ use docfg::docfg;
 #[cfg(feature = "proxying")]
 use futures::{
     executor::LocalPool,
-    task::{FutureObj, LocalFutureObj, LocalSpawn, LocalSpawnExt},
+    task::{LocalFutureObj, LocalSpawn, LocalSpawnExt},
 };
 use pin_project::pin_project;
 use std::{
@@ -21,7 +21,7 @@ use std::{
     ops::Deref,
     pin::Pin,
     rc::Rc,
-    sync::{Arc, OnceLock, Weak},
+    sync::{Arc, Weak},
     task::{ready, Context, Poll, Waker},
     time::Duration,
 };
@@ -282,11 +282,6 @@ impl<T> Event<T> {
     pub fn fulfill(self, val: T) {
         unsafe { self.raw.fulfill(val) };
     }
-
-    #[inline]
-    pub fn fulfill_boxed(self, val: Box<T>) {
-        unsafe { self.raw.fulfill_boxed(val) };
-    }
 }
 
 struct Promise<T> {
@@ -295,6 +290,7 @@ struct Promise<T> {
 }
 
 impl<T> Promise<T> {
+    /*
     pub fn then<F, U>(self, f: F) -> Self
     where
         F: 'static + FnOnce(T) -> U,
@@ -321,6 +317,7 @@ impl<T> Promise<T> {
             _phtm: PhantomData,
         };
     }
+    */
 
     pub fn into_raw(self) -> Inner {
         let mut this = ManuallyDrop::new(self);
@@ -368,7 +365,7 @@ impl<T> Drop for Promise<T> {
 
 enum Inner {
     Shared(Rc<RawPromise>),
-    Owned(RawPromise),
+    // Owned(RawPromise),
 }
 
 impl Deref for Inner {
@@ -378,7 +375,7 @@ impl Deref for Inner {
     fn deref(&self) -> &Self::Target {
         match self {
             Inner::Shared(raw) => raw,
-            Inner::Owned(raw) => raw,
+            // Inner::Owned(raw) => raw,
         }
     }
 }
