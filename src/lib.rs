@@ -9,16 +9,18 @@ use std::{
     time::Duration,
 };
 
+#[doc(hidden)]
+pub extern crate std as libstd;
+
 #[cfg(feature = "fetch")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fetch")))]
 pub mod fetch;
 pub mod future;
-#[cfg(feature = "html")]
-#[cfg_attr(docsrs, doc(cfg(feature = "html")))]
-pub mod html;
 #[cfg(feature = "proxying")]
 #[cfg_attr(docsrs, doc(cfg(feature = "proxying")))]
 pub mod proxying;
+// pub mod socket;
+pub mod value;
 
 pub const EMSCRIPTEN_VERSION: Version = Version::new(
     sys::__EMSCRIPTEN_major__ as u64,
@@ -80,7 +82,7 @@ pub fn set_main_loop<F: FnMut()>(mut f: F, timing: Option<Timing>, simulate_infi
     unsafe {
         if let Some(timing) = timing {
             let mut first_call = true;
-            let mut f = move || {
+            let f = move || {
                 if std::mem::take(&mut first_call) {
                     set_main_loop_timing(timing);
                 }

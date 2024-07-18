@@ -4,12 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-# default = ["html"]
-default = ["html", "asyncify", "proxying"]
+default = ["fetch", "asyncify", "proxying"]
 asyncify = []
 fetch = ["dep:http"]
 proxying = []
-html = []
 
 [dependencies]
 bitflags = "2.5.0"
@@ -22,6 +20,8 @@ pin-project = "1.1.5"
 semver = "1.0.23"
 thiserror = "1.0.61"
 utils-atomics = { version = "1.1.2", features = ["futures"] }
+em-bindgen-macros = { path = "macros" }
+concat-idents = "1.1.5"
 
 [build-dependencies]
 bindgen = "0.69.4"

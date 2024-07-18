@@ -70,7 +70,7 @@ impl<'a> Queue<'a> {
 
     pub fn proxy_blocking<F>(&self, target_thread: &impl JoinHandleExt, f: F) -> bool
     where
-        F: 'a + FnOnce() + Send,
+        F: FnOnce() + Send,
     {
         unsafe extern "C" fn proxy<F: FnOnce()>(arg: *mut c_void) {
             Box::from_raw(arg.cast::<F>())();
@@ -91,7 +91,7 @@ impl<'a> Queue<'a> {
 
     pub fn proxy_blocking_with_ctx<F>(&self, target_thread: &impl JoinHandleExt, f: F) -> bool
     where
-        F: 'a + FnOnce(Context) + Send,
+        F: FnOnce(Context) + Send,
     {
         unsafe extern "C" fn proxy<F: FnOnce(Context)>(
             ctx: *mut sys::em_proxying_ctx,

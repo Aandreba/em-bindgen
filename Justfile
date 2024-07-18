@@ -8,3 +8,6 @@ examples:
 	mkdir -p out
 	RUST_BACKTRACE=1 cargo +nightly build --package em-examples --target wasm32-unknown-emscripten
 	emrun out/index.html
+
+expand:
+	cd examples && cargo expand
