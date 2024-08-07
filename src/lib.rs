@@ -133,6 +133,13 @@ pub fn set_main_loop_timing(timing: Timing) {
     }
 }
 
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_get_now)
+#[doc(alias = "emscripten_get_now")]
+#[inline(always)]
+pub fn get_now() -> f64 {
+    unsafe { sys::emscripten_get_now() }
+}
+
 /// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_sleep)
 #[docfg(feature = "asyncify")]
 #[doc(alias = "emscripten_sleep")]
