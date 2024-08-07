@@ -1,6 +1,10 @@
 use crate::sys::{self, *};
 use core::ffi::{c_int, CStr};
-use libc::c_void;
+use libc::{c_char, c_void};
+
+const EMSCRIPTEN_EVENT_TARGET_DOCUMENT: *const c_char = 1usize as *const c_char;
+const EMSCRIPTEN_EVENT_TARGET_WINDOW: *const c_char = 2usize as *const c_char;
+const EMSCRIPTEN_EVENT_TARGET_SCREEN: *const c_char = 3usize as *const c_char;
 
 /// See [Emscripten docs](https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_get_canvas_element_size)
 #[doc(alias = "emscripten_get_canvas_element_size")]
@@ -20,8 +24,8 @@ pub fn set_canvas_element_size(target: &CStr, width: c_int, height: c_int) {
 
 /// See [Emscripten docs](https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_set_fullscreenchange_callback)
 #[doc(alias = "emscripten_set_fullscreenchange_callback")]
-pub fn set_fullscreenchange_callback<F>(
-    target: &CStr,
+pub fn set_fullscreenchange_callback<'a, F>(
+    target: impl Into<Target<'a>>,
     use_capture: bool,
     f: F,
 ) -> Result<(), HtmlError>
@@ -50,7 +54,7 @@ where
     let f = Box::into_raw(Box::new(f));
     if let Err(e) = tri(unsafe {
         sys::emscripten_set_fullscreenchange_callback_on_thread(
-            target.as_ptr(),
+            target.into().get(),
             f.cast(),
             use_capture as c_int,
             Some(fullscreenchange::<F>),
@@ -65,7 +69,11 @@ where
 
 /// See [Emscripten docs](https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_set_resize_callback)
 #[doc(alias = "emscripten_set_resize_callback")]
-pub fn set_resize_callback<F>(target: &CStr, use_capture: bool, f: F) -> Result<(), HtmlError>
+pub fn set_resize_callback<'a, F>(
+    target: impl Into<Target<'a>>,
+    use_capture: bool,
+    f: F,
+) -> Result<(), HtmlError>
 where
     F: 'static + FnMut(UiEvent),
 {
@@ -92,7 +100,7 @@ where
     let f = Box::into_raw(Box::new(f));
     if let Err(e) = tri(unsafe {
         sys::emscripten_set_resize_callback_on_thread(
-            target.as_ptr(),
+            target.into().get(),
             f.cast(),
             use_capture as c_int,
             Some(fullscreenchange::<F>),
@@ -103,6 +111,33 @@ where
         return Err(e);
     }
     return Ok(());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(usize)]
+pub enum Target<'a> {
+    Document = 1,
+    Window = 2,
+    Screen = 3,
+    Custom(&'a CStr),
+}
+
+impl Target<'_> {
+    fn get(self) -> *const c_char {
+        match self {
+            Target::Document => EMSCRIPTEN_EVENT_TARGET_DOCUMENT,
+            Target::Window => EMSCRIPTEN_EVENT_TARGET_WINDOW,
+            Target::Screen => EMSCRIPTEN_EVENT_TARGET_SCREEN,
+            Target::Custom(name) => name.as_ptr(),
+        }
+    }
+}
+
+impl<'a> From<&'a CStr> for Target<'a> {
+    #[inline]
+    fn from(value: &'a CStr) -> Self {
+        Self::Custom(value)
+    }
 }
 
 #[derive(Debug, Clone)]
