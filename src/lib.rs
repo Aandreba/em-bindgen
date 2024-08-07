@@ -20,7 +20,11 @@ pub mod future;
 #[cfg_attr(docsrs, doc(cfg(feature = "proxying")))]
 pub mod proxying;
 // pub mod socket;
+#[cfg(feature = "html")]
+#[cfg_attr(docsrs, doc(cfg(feature = "html")))]
+pub mod html;
 pub mod value;
+pub mod wget;
 
 pub const EMSCRIPTEN_VERSION: Version = Version::new(
     sys::__EMSCRIPTEN_major__ as u64,
