@@ -1,9 +1,8 @@
-use utils_atomics::TakeCell;
-
 use crate::sys;
 use std::{
     ffi::c_void, marker::PhantomData, mem::transmute, os::unix::thread::JoinHandleExt, sync::Arc,
 };
+use utils_atomics::TakeCell;
 
 pub struct Queue<'a> {
     inner: *mut sys::em_proxying_queue,
@@ -68,24 +67,45 @@ impl<'a> Queue<'a> {
         }
     }
 
-    pub fn proxy_blocking<F>(&self, target_thread: &impl JoinHandleExt, f: F) -> bool
+    pub fn proxy_blocking<F, T>(&self, target_thread: &impl JoinHandleExt, f: F) -> Option<T>
     where
-        F: FnOnce() + Send,
+        F: FnOnce() -> T + Send,
+        T: Send,
     {
-        unsafe extern "C" fn proxy<F: FnOnce()>(arg: *mut c_void) {
-            Box::from_raw(arg.cast::<F>())();
+        struct Proxy<F, T> {
+            result: Option<T>,
+            f: Option<F>,
         }
 
-        let arg = Box::into_raw(Box::new(f));
+        unsafe extern "C" fn proxy<F: FnOnce() -> T, T>(arg: *mut c_void) {
+            let proxy = &mut *arg.cast::<Proxy<F, T>>();
+            proxy.result = Some((proxy.f.take().unwrap_unchecked())());
+        }
+
+        let target_thread = target_thread.as_pthread_t();
+        if target_thread == unsafe { libc::pthread_self() } {
+            return Some(f());
+        }
+
+        let arg = Box::into_raw(Box::new(Proxy {
+            result: None,
+            f: Some(f),
+        }));
+
         unsafe {
-            return sys::emscripten_proxy_sync(
+            let result = sys::emscripten_proxy_sync(
                 self.inner,
-                transmute::<std::os::unix::thread::RawPthread, sys::pthread_t>(
-                    target_thread.as_pthread_t(),
-                ),
-                Some(proxy::<F>),
+                target_thread,
+                Some(proxy::<F, T>),
                 arg.cast(),
-            ) != 0;
+            ) == 0;
+
+            let arg = Box::from_raw(arg);
+            if result {
+                return arg.result;
+            } else {
+                return None;
+            }
         }
     }
 

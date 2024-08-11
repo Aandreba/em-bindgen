@@ -1,10 +1,12 @@
-use em_bindgen::{set_main_loop, value::JsValue};
+use em_bindgen::{set_main_loop, utils::file_dialog::FileDialog};
 use http::Method;
 use std::time::Duration;
 
 pub fn main() {
-    println!("{}", JsValue::TRUE == JsValue::FALSE);
-    println!("{}", JsValue::TRUE == JsValue::TRUE);
+    println!("{:?}", FileDialog::default().load_file());
+    assert!(FileDialog::default()
+        .set_file_name("hello.txt")
+        .save_file(b"Hello world!"));
 }
 
 //* TESTS *//

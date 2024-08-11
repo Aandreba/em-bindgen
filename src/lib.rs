@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+extern crate alloc;
 #[doc(hidden)]
 pub extern crate std as libstd;
 
@@ -23,6 +24,7 @@ pub mod proxying;
 #[cfg(feature = "html")]
 #[cfg_attr(docsrs, doc(cfg(feature = "html")))]
 pub mod html;
+pub mod utils;
 pub mod value;
 pub mod wget;
 
@@ -31,13 +33,6 @@ pub const EMSCRIPTEN_VERSION: Version = Version::new(
     sys::__EMSCRIPTEN_minor__ as u64,
     sys::__EMSCRIPTEN_tiny__ as u64,
 );
-
-/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_cancel_main_loop)
-#[doc(alias = "emscripten_cancel_main_loop")]
-#[inline]
-pub fn cancel_main_loop() {
-    unsafe { sys::emscripten_cancel_main_loop() }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Timing {
@@ -131,6 +126,13 @@ pub fn set_main_loop_timing(timing: Timing) {
     unsafe {
         sys::emscripten_set_main_loop_timing(mode, value);
     }
+}
+
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_cancel_main_loop)
+#[doc(alias = "emscripten_cancel_main_loop")]
+#[inline]
+pub fn cancel_main_loop() {
+    unsafe { sys::emscripten_cancel_main_loop() }
 }
 
 /// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_get_now)

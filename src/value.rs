@@ -2,6 +2,7 @@ use core::{cmp::Ordering, ffi::CStr, mem::ManuallyDrop, ptr::NonNull};
 use std::ffi::{CString, NulError};
 use val_sys::*;
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct JsValue {
     handle: NonNull<_EM_VAL>,
@@ -59,7 +60,7 @@ impl JsValue {
     /// Equivalent to `val::release_ownership`
     pub fn into_handle(self) -> EM_VAL {
         let this = ManuallyDrop::new(self);
-        return this.handle.as_ptr();
+        return this.as_handle();
     }
 
     #[inline]
@@ -196,13 +197,6 @@ mod val_sys {
         pub fn _emval_greater_than(first: EM_VAL, second: EM_VAL) -> bool;
         pub fn _emval_less_than(first: EM_VAL, second: EM_VAL) -> bool;
         pub fn _emval_not(object: EM_VAL);
-
-        pub fn _emval_call(
-            caller: EM_METHOD_CALLER,
-            func: EM_VAL,
-            destructors: *mut EM_DESTRUCTORS,
-            argv: EM_VAR_ARGS,
-        ) -> EM_GENERIC_WIRE_TYPE;
 
         pub fn _emval_throw(object: EM_VAL) -> !;
     }
