@@ -3,7 +3,7 @@ use http::Method;
 use std::time::Duration;
 
 pub fn main() {
-    println!("{:?}", FileDialog::default().load_file());
+    // println!("{:?}", FileDialog::default().load_file());
     assert!(FileDialog::default()
         .set_file_name("hello.txt")
         .save_file(b"Hello world!"));

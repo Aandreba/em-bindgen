@@ -78,25 +78,56 @@ bool SaveFile(const uint8_t *contents, uintptr_t contents_len,
 
                  try {
                    if ("showSaveFilePicker" in window) {
-                     /** @type {FileSystemFileHandle} */
-                     let fileHandle;
-                     try {
-                       fileHandle = await window.showSaveFilePicker(
-                           {suggestedName, types});
-                     } catch (e) {
-                       if (e instanceof
-                           DOMException && (e.name == "AbortError" ||
-                                            e.code == DOMException.ABORT_ERR))
-                         return false;
-                       throw e;
-                     }
+                     return await new Promise(function(resolve) {
+                       const button = document.createElement("button");
+                       const dialog = document.createElement("dialog");
 
-                     const writableHandle = await fileHandle.createWritable();
-                     try {
-                       await writableHandle.write(contents);
-                     } finally {
-                       await writableHandle.close();
-                     }
+                       button.innerHTML = "Save file";
+                       button.addEventListener(
+                           "click",
+                           async function() {
+                             try {
+                               /** @type {FileSystemFileHandle} */
+                               let fileHandle;
+                               try {
+                                 fileHandle = await window.showSaveFilePicker(
+                                     {suggestedName, types});
+                               } catch (e) {
+                                 if (e instanceof
+                                     DOMException &&
+                                         (e.name == "AbortError" ||
+                                          e.code == DOMException.ABORT_ERR))
+                                   return resolve(false);
+                                 throw e;
+                               }
+
+                               const writableHandle =
+                                   await fileHandle.createWritable();
+                               try {
+                                 await writableHandle.write(contents);
+                               } finally {
+                                 await writableHandle.close();
+                               }
+
+                               resolve(true);
+                             } finally {
+                               dialog.close();
+                             }
+                           },
+                           {once : true, capture : true});
+
+                       dialog.addEventListener("close",
+                                               function() {
+                                                 resolve(false);
+                                                 document.body.removeChild(
+                                                     dialog);
+                                               },
+                                               {once : true, capture : true});
+
+                       document.body.appendChild(dialog);
+                       dialog.appendChild(button);
+                       dialog.showModal();
+                     });
                    } else {
                      const blob = new Blob([contents], {
                        type:
