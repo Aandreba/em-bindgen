@@ -21,6 +21,9 @@ pub mod future;
 #[cfg_attr(docsrs, doc(cfg(feature = "proxying")))]
 pub mod proxying;
 // pub mod socket;
+#[cfg(feature = "chrono")]
+#[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
+pub mod chrono;
 #[cfg(feature = "console")]
 #[cfg_attr(docsrs, doc(cfg(feature = "console")))]
 pub mod console;

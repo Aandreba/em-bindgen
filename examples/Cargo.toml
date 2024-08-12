@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 em-bindgen = { path = "..", features = ["fetch"] }
 http = "1.1.0"
+log = "0.4.22"

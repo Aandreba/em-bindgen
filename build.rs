@@ -8,6 +8,8 @@ pub fn main() {
     color_eyre::install().unwrap();
     println!("cargo::rerun-if-changed=src/file_dialog.cpp");
     println!("cargo::rerun-if-changed=src/file_dialog.h");
+    println!("cargo::rerun-if-changed=src/chrono.cpp");
+    println!("cargo::rerun-if-changed=src/chrono.h");
 
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("Could not find emsdk path"));
     let emsdk = PathBuf::from(std::env::var_os("EMSDK").expect("Could not find emsdk path"));
@@ -19,6 +21,9 @@ pub fn main() {
     std::thread::scope(|s| {
         build_bindings(s, &include, &sysroot, &out_dir);
         build_file_dialog(s, &sysroot, &out_dir);
+        if std::env::var_os("CARGO_FEATURE_CHRONO").is_some() {
+            build_chrono(s, &sysroot, &out_dir);
+        }
     });
 }
 
@@ -156,5 +161,38 @@ fn build_file_dialog<'scope, 'env>(
             .flag("-fvisibility=default")
             .flag(format!("--sysroot={}", sysroot.display()))
             .compile("file_dialog");
+    });
+}
+
+fn build_chrono<'scope, 'env>(
+    s: &'scope Scope<'scope, 'env>,
+    sysroot: &'env Path,
+    out_dir: &'env Path,
+) {
+    // TYPES
+    s.spawn(|| {
+        builder()
+            .header("chrono.h")
+            .clang_arg(format!("--sysroot={}", sysroot.display()))
+            .clang_arg("-fvisibility=default")
+            .clang_arg("--target=wasm32-emscripten")
+            .default_enum_style(bindgen::EnumVariation::Rust {
+                non_exhaustive: true,
+            })
+            .generate_cstr(true)
+            .layout_tests(false)
+            .generate()
+            .unwrap()
+            .write_to_file(out_dir.join("chrono.rs"))
+            .unwrap();
+    });
+
+    // COMPILE
+    s.spawn(|| {
+        cc::Build::new()
+            .file("chrono.cpp")
+            .flag("-fvisibility=default")
+            .flag(format!("--sysroot={}", sysroot.display()))
+            .compile("chrono");
     });
 }

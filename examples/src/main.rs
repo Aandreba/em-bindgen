@@ -1,9 +1,14 @@
-use em_bindgen::{set_main_loop, utils::file_dialog::FileDialog};
+use em_bindgen::{console::init_with_level, set_main_loop};
 use http::Method;
+use log::LevelFilter;
 use std::time::Duration;
 
 pub fn main() {
-    println!("{:?}", FileDialog::default().load_file());
+    init_with_level(LevelFilter::Debug).unwrap();
+    log::info!("Hello world!");
+    println!("Hi!!");
+
+    // println!("{:?}", FileDialog::default().load_file());
     // assert!(FileDialog::default()
     //     .set_file_name("hello.txt")
     //     .save_file(b"Hello world!"));
