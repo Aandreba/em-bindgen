@@ -57,6 +57,11 @@ fn build_bindings<'scope, 'env>(
                 em_builder.header(include.join("emscripten/proxying.h").display().to_string())
         }
 
+        if std::env::var_os("CARGO_FEATURE_CONSOLE").is_some() {
+            em_builder =
+                em_builder.header(include.join("emscripten/console.h").display().to_string())
+        }
+
         let mut dst = Vec::new();
         em_builder
             .generate()
@@ -95,6 +100,11 @@ fn build_bindings<'scope, 'env>(
         if std::env::var_os("CARGO_FEATURE_PROXYING").is_some() {
             em_builder =
                 em_builder.header(include.join("emscripten/proxying.h").display().to_string())
+        }
+
+        if std::env::var_os("CARGO_FEATURE_CONSOLE").is_some() {
+            em_builder =
+                em_builder.header(include.join("emscripten/console.h").display().to_string())
         }
 
         let mut dst = Vec::new();
