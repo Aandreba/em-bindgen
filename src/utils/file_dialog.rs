@@ -4,7 +4,7 @@ use alloc::{
     ffi::{CString, NulError},
     fmt::{Debug, Display},
 };
-use core::time::Duration;
+use core::{ffi::CStr, time::Duration};
 use libc::{c_char, c_void};
 use libstd::{
     collections::{hash_map::Entry, HashMap},
@@ -57,7 +57,15 @@ impl FileDialog {
                 return None;
             }
 
+            let name_len = CStr::from_ptr(file.name).count_bytes();
+            let name = String::from_utf8_unchecked(Vec::from_raw_parts(
+                file.name as *mut _,
+                name_len,
+                file.name_capacity,
+            ));
+
             return Some(FileHandle {
+                name,
                 last_modified: SystemTime::UNIX_EPOCH
                     + Duration::from_millis(file.last_modified_ms as u64),
                 contents: Vec::from_raw_parts(file.contents, file.contents_len, file.contents_len),
@@ -160,6 +168,7 @@ impl FileDialog {
 
 #[derive(Debug, Clone)]
 pub struct FileHandle {
+    pub name: String,
     pub last_modified: SystemTime,
     pub contents: Vec<u8>,
 }

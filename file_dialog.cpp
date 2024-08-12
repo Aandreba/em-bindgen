@@ -9,6 +9,7 @@ extern "C" {
 
 File LoadFile(const char *accept, malloc_t memalloc) {
   File file;
+  file.name = nullptr;
   file.contents = nullptr;
 
   MAIN_THREAD_EM_ASM(
@@ -48,19 +49,27 @@ File LoadFile(const char *accept, malloc_t memalloc) {
           const file = files[0];
           Module.HEAPF64[$3 >> 3] = file.lastModified;
 
+          const capacity = 4 * file.name.length + 1;
+          const namePtr =
+              Module.ccall("__INTERNAL_MALLOC_", "number",
+                           [ "number", "number" ], [ $6, capacity ]);
+          Module.HEAPU32[$4 >> 2] = namePtr;
+          Module.HEAPU32[$5 >> 2] = capacity;
+          stringToUTF8(file.name, namePtr, capacity);
+
           const contents = new Uint8Array(await file.arrayBuffer());
           Module.HEAPU32[$2 >> 2] = contents.byteLength;
 
           const contentsPtr =
               Module.ccall("__INTERNAL_MALLOC_", "number",
-                           [ "number", "number" ], [ $4, contents.byteLength ]);
+                           [ "number", "number" ], [ $6, contents.byteLength ]);
           Module.HEAPU32[$1 >> 2] = contentsPtr;
           Module.HEAPU8.subarray(contentsPtr, contentsPtr + contents.byteLength)
               .set(contents);
         });
       },
       accept, &file.contents, &file.contents_len, &file.last_modified_ms,
-      memalloc);
+      &file.name, &file.name_capacity, memalloc);
 
   return file;
 }

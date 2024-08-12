@@ -9,6 +9,8 @@ extern "C" {
 typedef void *(*malloc_t)(uintptr_t);
 
 typedef struct {
+  const char *name;
+  uintptr_t name_capacity;
   double last_modified_ms;
   uint8_t *contents;
   uintptr_t contents_len;
