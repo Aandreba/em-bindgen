@@ -4,13 +4,15 @@ use alloc::{
     ffi::{CString, NulError},
     fmt::{Debug, Display},
 };
-use core::{ffi::CStr, time::Duration};
+use core::{ffi::CStr, ptr::NonNull, time::Duration};
 use libc::{c_char, c_void};
 use libstd::{
     collections::{hash_map::Entry, HashMap},
+    fs::File,
     time::SystemTime,
 };
 use typed_arena::Arena;
+use utils_atomics::channel::once::{async_channel, AsyncSender};
 
 #[derive(Debug, Clone, Default)]
 pub struct FileDialog {
@@ -34,7 +36,12 @@ impl FileDialog {
 }
 
 impl FileDialog {
-    pub fn load_file(self) -> Option<FileHandle> {
+    pub async fn load_file(self) -> Option<FileHandle> {
+        unsafe extern "C" fn oncomplete(file: *mut sys::File, user_data: *mut c_void) {
+            let send = Box::from_raw(user_data.cast::<AsyncSender<Option<sys::File>>>());
+            send.send(NonNull::new(file).map(|x| x.read()));
+        }
+
         let accept = match self
             .filter
             .into_iter()
@@ -52,7 +59,15 @@ impl FileDialog {
         };
 
         unsafe {
-            let file = sys::LoadFile(accept.as_ptr(), Some(memalloc));
+            let (send, recv) = async_channel::<Option<sys::File>>();
+            sys::LoadFile(
+                accept.as_ptr(),
+                Some(memalloc),
+                Some(oncomplete),
+                Box::into_raw(Box::new(send)).cast(),
+            );
+
+            let file = recv.await.flatten()?;
             if file.contents.is_null() {
                 return None;
             }
@@ -162,6 +177,35 @@ impl FileDialog {
                 types.as_ptr(),
                 types.len(),
             );
+        }
+    }
+}
+
+struct PendingFile {
+    inner: NonNull<sys::File>,
+}
+
+impl Drop for PendingFile {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe {
+            let inner = self.inner.as_ref();
+
+            if !inner.name.is_null() {
+                std::ptr::drop_in_place(std::slice::from_raw_parts_mut(
+                    inner.name.cast_mut(),
+                    inner.name_capacity,
+                ));
+            }
+
+            if !inner.contents.is_null() {
+                std::ptr::drop_in_place(std::slice::from_raw_parts_mut(
+                    inner.contents,
+                    inner.contents_len,
+                ));
+            }
+
+            libc::free(self.inner.as_ptr().cast());
         }
     }
 }

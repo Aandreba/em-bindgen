@@ -28,7 +28,10 @@ typedef struct {
   uintptr_t accept_len;
 } FileType;
 
-File LoadFile(const char *accept, malloc_t memalloc);
+typedef void (*LoadFile_oncomplete_t)(File *, void *);
+
+void LoadFile(const char *accept, malloc_t memalloc,
+              LoadFile_oncomplete_t oncomplete, void *oncomplete_userdata);
 bool SaveFile(const uint8_t *contents, uintptr_t contents_len,
               const char *suggested_name, const char *suggested_mime,
               const FileType *types, uintptr_t types_len);

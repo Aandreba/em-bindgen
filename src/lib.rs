@@ -92,6 +92,7 @@ pub fn set_timeout<F: 'static + FnOnce()>(dur: Duration, f: F) {
 #[doc(alias = "emscripten_set_main_loop")]
 pub fn set_infinite_main_loop<F: FnMut()>(mut f: F, mut timing: Option<Timing>) -> ! {
     unsafe extern "C" fn main_loop<F: FnMut()>(arg: *mut c_void) {
+        log::debug!("{arg:?}");
         (&mut *arg.cast::<F>())()
     }
 
@@ -101,20 +102,14 @@ pub fn set_infinite_main_loop<F: FnMut()>(mut f: F, mut timing: Option<Timing>) 
     }
 
     unsafe {
-        let mut f = Box::new(move || {
+        let f = Box::new(move || {
             if let Some(timing) = std::mem::take(&mut timing) {
                 set_main_loop_timing(timing);
             }
             f();
         });
 
-        sys::emscripten_set_main_loop_arg(
-            Some(main_loop_of(&f)),
-            std::ptr::addr_of_mut!(*f).cast(),
-            0,
-            1,
-        );
-
+        sys::emscripten_set_main_loop_arg(Some(main_loop_of(&f)), Box::into_raw(f).cast(), 0, 1);
         unreachable_unchecked()
     }
 }

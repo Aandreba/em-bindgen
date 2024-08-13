@@ -1,4 +1,5 @@
 use core::{cmp::Ordering, ffi::CStr, mem::ManuallyDrop, ptr::NonNull};
+use docfg::docfg;
 use std::ffi::{CString, NulError};
 use val_sys::*;
 
@@ -77,6 +78,13 @@ impl JsValue {
             return Some(Ordering::Greater);
         } else {
             return None;
+        }
+    }
+
+    #[docfg(feature = "asyncify")]
+    pub fn block_on(&self) -> JsValue {
+        JsValue {
+            handle: unsafe { NonNull::new_unchecked(_emval_await(self.as_handle())) },
         }
     }
 
@@ -199,5 +207,6 @@ mod val_sys {
         pub fn _emval_not(object: EM_VAL);
 
         pub fn _emval_throw(object: EM_VAL) -> !;
+        pub fn _emval_await(promise: EM_VAL) -> EM_VAL;
     }
 }

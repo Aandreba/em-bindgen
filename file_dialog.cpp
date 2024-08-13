@@ -2,20 +2,22 @@
 #include <emscripten.h>
 #include <emscripten/val.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-File LoadFile(const char *accept, malloc_t memalloc) {
-  File file;
-  file.name = nullptr;
-  file.contents = nullptr;
+void LoadFile(const char *accept, malloc_t memalloc,
+              LoadFile_oncomplete_t oncomplete, void *oncomplete_userdata) {
+  File *file = (File *)malloc(sizeof(File));
+  file->name = nullptr;
+  file->contents = nullptr;
 
   MAIN_THREAD_EM_ASM(
       {
-        return Asyncify.handleAsync(async function() {
-          const accept = UTF8ToString($0);
+        const accept = UTF8ToString($0);
+        (async function() {
           const files = await new Promise(function(resolve) {
             const input = document.createElement("input");
             const dialog = document.createElement("dialog");
@@ -66,12 +68,20 @@ File LoadFile(const char *accept, malloc_t memalloc) {
           Module.HEAPU32[$1 >> 2] = contentsPtr;
           Module.HEAPU8.subarray(contentsPtr, contentsPtr + contents.byteLength)
               .set(contents);
-        });
+        })()
+            .then(function() {
+              Module.ccall("__INTERNAL_LOAD_ONCOMPLETE", "void",
+                           [ "number", "number", "number" ], [ $7, $9, $8 ]);
+            })
+            .catch(function(e) {
+              console.error(e);
+              Module.ccall("__INTERNAL_LOAD_ONCOMPLETE", "void",
+                           [ "number", "number", "number" ], [ $7, 0, $8 ]);
+            });
       },
-      accept, &file.contents, &file.contents_len, &file.last_modified_ms,
-      &file.name, &file.name_capacity, memalloc);
-
-  return file;
+      accept, &file->contents, &file->contents_len, &file->last_modified_ms,
+      &file->name, &file->name_capacity, memalloc, oncomplete,
+      oncomplete_userdata, file);
 }
 
 bool SaveFile(const uint8_t *contents, uintptr_t contents_len,
@@ -166,6 +176,13 @@ bool SaveFile(const uint8_t *contents, uintptr_t contents_len,
 EMSCRIPTEN_KEEPALIVE void *__INTERNAL_MALLOC_(malloc_t memalloc,
                                               uintptr_t len) {
   return (memalloc)(len);
+}
+
+EMSCRIPTEN_KEEPALIVE void __INTERNAL_LOAD_ONCOMPLETE(LoadFile_oncomplete_t cb,
+                                                     File *file_ptr,
+                                                     void *user_data) {
+  (cb)(file_ptr, user_data);
+  free(file_ptr);
 }
 
 #ifdef __cplusplus
