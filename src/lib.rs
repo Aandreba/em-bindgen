@@ -140,7 +140,9 @@ pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
                     let info = &mut *arg.cast::<FiniteMainLoop<F>>();
 
                     if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
+                        log::error!("The main loop panicked!");
                         info.panic = Some(payload);
+                        info.event.fulfill_ref(());
                         return sys::EM_FALSE as c_int;
                     }
 
@@ -196,6 +198,7 @@ pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
 
                     if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
                         info.panic = Some(payload);
+                        info.event.fulfill_ref(());
                         return sys::EM_FALSE as c_int;
                     }
 
@@ -239,6 +242,7 @@ pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
 
                     if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
                         info.panic = Some(payload);
+                        info.event.fulfill_ref(());
                         return sys::EM_FALSE as c_int;
                     }
 
@@ -282,6 +286,7 @@ pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
 
                     if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
                         info.panic = Some(payload);
+                        info.event.fulfill_ref(());
                         return sys::EM_FALSE as c_int;
                     }
 
