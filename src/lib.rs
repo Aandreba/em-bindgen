@@ -142,18 +142,18 @@ pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
                     if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
                         info.panic = Some(payload);
                         info.event.fulfill_ref(());
-                        log::info!("false");
+                        log::info!("false 1");
                         return sys::EM_FALSE as c_int;
                     }
 
                     match CONTINUE_MAIN_LOOP.replace(true) {
                         true => {
-                            log::info!("false");
+                            log::info!("true");
                             return sys::EM_TRUE as c_int;
                         }
                         false => {
                             info.event.fulfill_ref(());
-                            log::info!("false");
+                            log::info!("false 2");
                             return sys::EM_FALSE as c_int;
                         }
                     }
