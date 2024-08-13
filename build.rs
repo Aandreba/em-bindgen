@@ -42,7 +42,7 @@ fn build_bindings<'scope, 'env>(
             .clang_arg("--target=x86_64-linux")
             .clang_arg(format!("--sysroot={}", sysroot.display()))
             .blocklist_type(".*")
-            .allowlist_function("(emscripten|em|glue)_.*")
+            .allowlist_function("(_emscripten|emscripten|em|glue)_.*")
             .default_enum_style(bindgen::EnumVariation::Rust {
                 non_exhaustive: true,
             })

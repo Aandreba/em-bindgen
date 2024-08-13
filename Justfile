@@ -7,7 +7,7 @@ check:
 examples:
 	mkdir -p out
 	RUST_BACKTRACE=1 cargo +nightly build --package em-examples --target wasm32-unknown-emscripten
-	emrun out/index.html
+	emrun out/index.html --no-browser
 
 expand:
 	cd examples && cargo expand

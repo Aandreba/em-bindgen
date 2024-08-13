@@ -257,7 +257,7 @@ impl<T> Future for JoinHandle<T> {
     }
 }
 
-fn event<T>() -> (Event<T>, Promise<T>) {
+pub(crate) fn event<T>() -> (Event<T>, Promise<T>) {
     let raw = Rc::new(RawPromise::new());
 
     return (
@@ -272,7 +272,7 @@ fn event<T>() -> (Event<T>, Promise<T>) {
     );
 }
 
-struct Event<T> {
+pub(crate) struct Event<T> {
     raw: Rc<RawPromise>,
     _phtm: PhantomData<T>,
 }
@@ -280,45 +280,21 @@ struct Event<T> {
 impl<T> Event<T> {
     #[inline]
     pub fn fulfill(self, val: T) {
+        unsafe { self.fulfill_ref(val) };
+    }
+
+    #[inline]
+    pub unsafe fn fulfill_ref(&self, val: T) {
         unsafe { self.raw.fulfill(val) };
     }
 }
 
-struct Promise<T> {
+pub(crate) struct Promise<T> {
     raw: ManuallyDrop<Inner>,
     _phtm: PhantomData<T>,
 }
 
 impl<T> Promise<T> {
-    /*
-    pub fn then<F, U>(self, f: F) -> Self
-    where
-        F: 'static + FnOnce(T) -> U,
-    {
-        return self.then_boxed(move |val| Box::new(f(*val)));
-    }
-
-    pub fn then_boxed<F, U>(self, f: F) -> Self
-    where
-        F: 'static + FnOnce(Box<T>) -> Box<U>,
-    {
-        let mut this = ManuallyDrop::new(self);
-        let raw = this.raw.then(|data| unsafe {
-            let data = Box::from_raw(data.cast::<T>());
-            return sys::em_settled_result_t {
-                result: sys::em_promise_result_t::EM_PROMISE_FULFILL,
-                value: Box::into_raw(f(data)).cast(),
-            };
-        });
-        unsafe { ManuallyDrop::drop(&mut this.raw) };
-
-        return Self {
-            raw: ManuallyDrop::new(Inner::Owned(raw)),
-            _phtm: PhantomData,
-        };
-    }
-    */
-
     pub fn into_raw(self) -> Inner {
         let mut this = ManuallyDrop::new(self);
         return unsafe { ManuallyDrop::take(&mut this.raw) };

@@ -1,11 +1,22 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+use alloc::ffi::CString;
+use core::{
+    any::{type_name, Any, TypeId},
+    cell::{Cell, UnsafeCell},
+    hint::unreachable_unchecked,
+    panic::AssertUnwindSafe,
+    ptr::addr_of_mut,
+};
 use docfg::docfg;
+use libstd::{
+    collections::HashMap,
+    panic::{catch_unwind, resume_unwind},
+};
 use semver::Version;
 use std::{
     ffi::{c_int, c_long, c_void, CStr},
     num::NonZeroU32,
-    ops::Deref,
     time::Duration,
 };
 
@@ -33,6 +44,11 @@ pub mod html;
 pub mod utils;
 pub mod value;
 pub mod wget;
+
+#[cfg(feature = "asyncify")]
+thread_local! {
+    static CONTINUE_MAIN_LOOP: Cell<bool> = Cell::new(true);
+}
 
 pub const EMSCRIPTEN_VERSION: Version = Version::new(
     sys::__EMSCRIPTEN_major__ as u64,
@@ -74,42 +90,209 @@ pub fn set_timeout<F: 'static + FnOnce()>(dur: Duration, f: F) {
 
 /// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_set_main_loop)
 #[doc(alias = "emscripten_set_main_loop")]
-pub fn set_main_loop<F: FnMut()>(mut f: F, timing: Option<Timing>, simulate_infinite_loop: bool) {
+pub fn set_infinite_main_loop<F: FnMut()>(mut f: F, mut timing: Option<Timing>) -> ! {
     unsafe extern "C" fn main_loop<F: FnMut()>(arg: *mut c_void) {
         (&mut *arg.cast::<F>())()
     }
 
     #[inline(always)]
-    fn main_loop_of<F: FnMut()>(_: &F) -> unsafe extern "C" fn(*mut c_void) {
+    fn main_loop_of<F: FnMut()>(_: &Box<F>) -> unsafe extern "C" fn(*mut c_void) {
         return main_loop::<F>;
     }
 
     unsafe {
-        if let Some(timing) = timing {
-            let mut first_call = true;
-            let f = move || {
-                if std::mem::take(&mut first_call) {
-                    set_main_loop_timing(timing);
-                }
-                f();
-            };
+        let mut f = Box::new(move || {
+            if let Some(timing) = std::mem::take(&mut timing) {
+                set_main_loop_timing(timing);
+            }
+            f();
+        });
 
-            let mut f = Box::new(f);
-            sys::emscripten_set_main_loop_arg(
-                Some(main_loop_of(f.deref())),
-                std::ptr::addr_of_mut!(*f).cast(),
-                0,
-                simulate_infinite_loop as c_int,
-            );
-        } else {
-            let mut f = Box::new(f);
-            sys::emscripten_set_main_loop_arg(
-                Some(main_loop::<F>),
-                std::ptr::addr_of_mut!(*f).cast(),
-                0,
-                simulate_infinite_loop as c_int,
-            );
+        sys::emscripten_set_main_loop_arg(
+            Some(main_loop_of(&f)),
+            std::ptr::addr_of_mut!(*f).cast(),
+            0,
+            1,
+        );
+
+        unreachable_unchecked()
+    }
+}
+
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_set_main_loop)
+#[docfg(feature = "asyncify")]
+#[doc(alias = "emscripten_set_main_loop")]
+pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
+    unsafe {
+        let (event, promise) = future::event::<()>();
+        CONTINUE_MAIN_LOOP.set(true);
+
+        match timing.unwrap_or(Timing::Raf(NonZeroU32::MIN)) {
+            Timing::Raf(delay) => {
+                struct FiniteMainLoop<F> {
+                    delay: NonZeroU32,
+                    remaining: NonZeroU32,
+                    event: future::Event<()>,
+                    panic: Option<Box<dyn Any + Send>>,
+                    f: F,
+                }
+
+                unsafe extern "C" fn main_loop<F: FnMut()>(_: f64, arg: *mut c_void) -> c_int {
+                    let info = &mut *arg.cast::<FiniteMainLoop<F>>();
+
+                    if let Some(rem) = info
+                        .remaining
+                        .get()
+                        .checked_sub(1)
+                        .and_then(NonZeroU32::new)
+                    {
+                        info.remaining = rem;
+                        return sys::EM_TRUE as c_int;
+                    }
+
+                    info.remaining = info.delay;
+
+                    if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
+                        info.panic = Some(payload);
+                        return sys::EM_FALSE as c_int;
+                    }
+
+                    match CONTINUE_MAIN_LOOP.replace(true) {
+                        true => return sys::EM_TRUE as c_int,
+                        false => {
+                            info.event.fulfill_ref(());
+                            return sys::EM_FALSE as c_int;
+                        }
+                    }
+                }
+
+                let mut info = Box::new(FiniteMainLoop {
+                    panic: None,
+                    remaining: delay,
+                    delay,
+                    event,
+                    f,
+                });
+
+                sys::emscripten_request_animation_frame_loop(
+                    Some(main_loop::<F>),
+                    addr_of_mut!(*info).cast(),
+                );
+                promise.block_on();
+
+                if let Some(payload) = info.panic {
+                    resume_unwind(payload);
+                }
+            }
+
+            Timing::SetTimeout(dur) => {
+                struct FiniteMainLoop<F> {
+                    event: future::Event<()>,
+                    panic: Option<Box<dyn Any + Send>>,
+                    f: F,
+                }
+
+                unsafe extern "C" fn main_loop<F: FnMut()>(_: f64, arg: *mut c_void) -> c_int {
+                    let info = &mut *arg.cast::<FiniteMainLoop<F>>();
+
+                    if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
+                        info.panic = Some(payload);
+                        return sys::EM_FALSE as c_int;
+                    }
+
+                    match CONTINUE_MAIN_LOOP.replace(true) {
+                        true => return sys::EM_TRUE as c_int,
+                        false => {
+                            info.event.fulfill_ref(());
+                            return sys::EM_FALSE as c_int;
+                        }
+                    }
+                }
+
+                let mut info = Box::new(FiniteMainLoop {
+                    panic: None,
+                    event,
+                    f,
+                });
+
+                sys::emscripten_set_timeout_loop(
+                    Some(main_loop::<F>),
+                    dur.as_millis() as f64,
+                    addr_of_mut!(*info).cast(),
+                );
+                promise.block_on();
+
+                if let Some(payload) = info.panic {
+                    resume_unwind(payload);
+                }
+            }
+
+            #[allow(deprecated)]
+            Timing::SetImmediate => {
+                struct FiniteMainLoop<F> {
+                    event: future::Event<()>,
+                    panic: Option<Box<dyn Any + Send>>,
+                    f: F,
+                }
+
+                unsafe extern "C" fn main_loop<F: FnMut()>(arg: *mut c_void) -> c_int {
+                    let info = &mut *arg.cast::<FiniteMainLoop<F>>();
+
+                    if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
+                        info.panic = Some(payload);
+                        return sys::EM_FALSE as c_int;
+                    }
+
+                    match CONTINUE_MAIN_LOOP.replace(true) {
+                        true => return sys::EM_TRUE as c_int,
+                        false => {
+                            info.event.fulfill_ref(());
+                            return sys::EM_FALSE as c_int;
+                        }
+                    }
+                }
+
+                let mut info = Box::new(FiniteMainLoop {
+                    panic: None,
+                    event,
+                    f,
+                });
+
+                sys::emscripten_set_immediate_loop(
+                    Some(main_loop::<F>),
+                    addr_of_mut!(*info).cast(),
+                );
+                promise.block_on();
+
+                if let Some(payload) = info.panic {
+                    resume_unwind(payload);
+                }
+            }
         }
+    }
+}
+
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_set_main_loop)
+#[doc(alias = "emscripten_set_main_loop")]
+pub fn set_async_main_loop<F: 'static + FnMut()>(mut f: F, mut timing: Option<Timing>) {
+    unsafe extern "C" fn main_loop<F: FnMut()>(arg: *mut c_void) {
+        (&mut *arg.cast::<F>())()
+    }
+
+    #[inline(always)]
+    fn main_loop_of<F: FnMut()>(_: &Box<F>) -> unsafe extern "C" fn(*mut c_void) {
+        return main_loop::<F>;
+    }
+
+    unsafe {
+        let f = Box::new(move || {
+            if let Some(timing) = std::mem::take(&mut timing) {
+                set_main_loop_timing(timing);
+            }
+            f();
+        });
+
+        sys::emscripten_set_main_loop_arg(Some(main_loop_of(&f)), Box::into_raw(f).cast(), 0, 0);
     }
 }
 
@@ -134,16 +317,60 @@ pub fn set_main_loop_timing(timing: Timing) {
     }
 }
 
+/// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_push_uncounted_main_loop_blocker)
+#[doc(alias = "emscripten_push_main_loop_blocker")]
+#[doc(alias = "emscripten_push_uncounted_main_loop_blocker")]
+pub fn push_main_loop_blocker<F: 'static + FnOnce()>(f: F, counted: bool) {
+    thread_local! {
+        static FN_NAME: UnsafeCell<HashMap<TypeId, CString>> = UnsafeCell::new(HashMap::new());
+    }
+
+    unsafe extern "C" fn main_loop_blocker<F: 'static + FnOnce()>(arg: *mut c_void) {
+        Box::from_raw(arg.cast::<F>())();
+    }
+
+    let f = Box::new(f);
+
+    unsafe {
+        let f_name = FN_NAME.with(|table| {
+            let table = &mut *table.get();
+            table.entry(TypeId::of::<F>()).or_insert_with(|| {
+                CString::new(type_name::<F>()).unwrap_or_else(|e| {
+                    let nul = e.nul_position();
+                    let mut bytes = e.into_vec();
+                    bytes.set_len(nul + 1);
+                    CString::from_vec_with_nul_unchecked(bytes)
+                })
+            }) as &CStr
+        });
+
+        match counted {
+            true => sys::_emscripten_push_main_loop_blocker(
+                Some(main_loop_blocker::<F>),
+                Box::into_raw(f).cast(),
+                f_name.as_ptr(),
+            ),
+            false => sys::_emscripten_push_uncounted_main_loop_blocker(
+                Some(main_loop_blocker::<F>),
+                Box::into_raw(f).cast(),
+                f_name.as_ptr(),
+            ),
+        }
+    }
+}
+
 /// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_cancel_main_loop)
 #[doc(alias = "emscripten_cancel_main_loop")]
 #[inline]
 pub fn cancel_main_loop() {
     unsafe { sys::emscripten_cancel_main_loop() }
+    #[cfg(feature = "asyncify")]
+    CONTINUE_MAIN_LOOP.set(false);
 }
 
 /// See [Emscripten documentation](https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_get_now)
 #[doc(alias = "emscripten_get_now")]
-#[inline(always)]
+#[inline]
 pub fn get_now() -> f64 {
     unsafe { sys::emscripten_get_now() }
 }
