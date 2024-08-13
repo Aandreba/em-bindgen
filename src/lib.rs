@@ -128,6 +128,48 @@ pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
         CONTINUE_MAIN_LOOP.set(true);
 
         match timing.unwrap_or(Timing::Raf(NonZeroU32::MIN)) {
+            // Optimized RAF version with no skipped frames
+            Timing::Raf(NonZeroU32::MIN) => {
+                struct FiniteMainLoop<F> {
+                    event: future::Event<()>,
+                    panic: Option<Box<dyn Any + Send>>,
+                    f: F,
+                }
+
+                unsafe extern "C" fn main_loop<F: FnMut()>(_: f64, arg: *mut c_void) -> c_int {
+                    let info = &mut *arg.cast::<FiniteMainLoop<F>>();
+
+                    if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
+                        info.panic = Some(payload);
+                        return sys::EM_FALSE as c_int;
+                    }
+
+                    match CONTINUE_MAIN_LOOP.replace(true) {
+                        true => return sys::EM_TRUE as c_int,
+                        false => {
+                            info.event.fulfill_ref(());
+                            return sys::EM_FALSE as c_int;
+                        }
+                    }
+                }
+
+                let mut info = Box::new(FiniteMainLoop {
+                    panic: None,
+                    event,
+                    f,
+                });
+
+                sys::emscripten_request_animation_frame_loop(
+                    Some(main_loop::<F>),
+                    addr_of_mut!(*info).cast(),
+                );
+                promise.block_on();
+
+                if let Some(payload) = info.panic {
+                    resume_unwind(payload);
+                }
+            }
+
             Timing::Raf(delay) => {
                 struct FiniteMainLoop<F> {
                     delay: NonZeroU32,
