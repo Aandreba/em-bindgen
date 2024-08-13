@@ -140,16 +140,20 @@ pub fn set_finite_main_loop<F: FnMut()>(f: F, timing: Option<Timing>) {
                     let info = &mut *arg.cast::<FiniteMainLoop<F>>();
 
                     if let Err(payload) = catch_unwind(AssertUnwindSafe(&mut info.f)) {
-                        log::error!("The main loop panicked!");
                         info.panic = Some(payload);
                         info.event.fulfill_ref(());
+                        log::info!("false");
                         return sys::EM_FALSE as c_int;
                     }
 
                     match CONTINUE_MAIN_LOOP.replace(true) {
-                        true => return sys::EM_TRUE as c_int,
+                        true => {
+                            log::info!("false");
+                            return sys::EM_TRUE as c_int;
+                        }
                         false => {
                             info.event.fulfill_ref(());
+                            log::info!("false");
                             return sys::EM_FALSE as c_int;
                         }
                     }
