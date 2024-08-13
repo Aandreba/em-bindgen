@@ -6,6 +6,22 @@ const EMSCRIPTEN_EVENT_TARGET_DOCUMENT: *const c_char = 1usize as *const c_char;
 const EMSCRIPTEN_EVENT_TARGET_WINDOW: *const c_char = 2usize as *const c_char;
 const EMSCRIPTEN_EVENT_TARGET_SCREEN: *const c_char = 3usize as *const c_char;
 
+/// See [Emscripten docs](https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_get_element_css_size)
+#[doc(alias = "emscripten_get_element_css_size")]
+#[inline]
+pub fn get_element_css_size(target: &CStr) -> [f64; 2] {
+    let mut size = [0.; 2];
+    unsafe { sys::emscripten_get_element_css_size(target.as_ptr(), &mut size[0], &mut size[1]) };
+    return size;
+}
+
+/// See [Emscripten docs](https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_set_canvas_size)
+#[doc(alias = "emscripten_set_canvas_size")]
+#[inline]
+pub fn set_canvas_size(width: c_int, height: c_int) {
+    unsafe { sys::emscripten_set_canvas_size(width, height) };
+}
+
 /// See [Emscripten docs](https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_get_canvas_element_size)
 #[doc(alias = "emscripten_get_canvas_element_size")]
 #[inline]
