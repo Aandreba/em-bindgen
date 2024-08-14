@@ -257,7 +257,7 @@ impl<T> Future for JoinHandle<T> {
     }
 }
 
-pub(crate) fn event<T>() -> (Event<T>, Promise<T>) {
+pub fn event<T>() -> (Event<T>, Promise<T>) {
     let raw = Rc::new(RawPromise::new());
 
     return (
@@ -272,7 +272,7 @@ pub(crate) fn event<T>() -> (Event<T>, Promise<T>) {
     );
 }
 
-pub(crate) struct Event<T> {
+pub struct Event<T> {
     raw: Rc<RawPromise>,
     _phtm: PhantomData<T>,
 }
@@ -289,7 +289,7 @@ impl<T> Event<T> {
     }
 }
 
-pub(crate) struct Promise<T> {
+pub struct Promise<T> {
     raw: ManuallyDrop<Inner>,
     _phtm: PhantomData<T>,
 }
