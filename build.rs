@@ -21,8 +21,12 @@ pub fn main() {
     std::thread::scope(|s| {
         build_bindings(s, &include, &sysroot, &out_dir);
         build_file_dialog(s, &sysroot, &out_dir);
+
         if std::env::var_os("CARGO_FEATURE_CHRONO").is_some() {
             build_chrono(s, &sysroot, &out_dir);
+        }
+        if std::env::var_os("CARGO_FEATURE_FETCH").is_some() {
+            build_fetch(s, &sysroot, &out_dir);
         }
     });
 }
@@ -51,10 +55,6 @@ fn build_bindings<'scope, 'env>(
 
         if std::env::var_os("CARGO_FEATURE_HTML").is_some() {
             em_builder = em_builder.header(include.join("emscripten/html5.h").display().to_string())
-        }
-
-        if std::env::var_os("CARGO_FEATURE_FETCH").is_some() {
-            em_builder = em_builder.header(include.join("emscripten/fetch.h").display().to_string())
         }
 
         if std::env::var_os("CARGO_FEATURE_PROXYING").is_some() {
@@ -96,10 +96,6 @@ fn build_bindings<'scope, 'env>(
 
         if std::env::var_os("CARGO_FEATURE_HTML").is_some() {
             em_builder = em_builder.header(include.join("emscripten/html5.h").display().to_string())
-        }
-
-        if std::env::var_os("CARGO_FEATURE_FETCH").is_some() {
-            em_builder = em_builder.header(include.join("emscripten/fetch.h").display().to_string())
         }
 
         if std::env::var_os("CARGO_FEATURE_PROXYING").is_some() {
@@ -194,5 +190,38 @@ fn build_chrono<'scope, 'env>(
             .flag("-fvisibility=default")
             .flag(format!("--sysroot={}", sysroot.display()))
             .compile("chrono");
+    });
+}
+
+fn build_fetch<'scope, 'env>(
+    s: &'scope Scope<'scope, 'env>,
+    sysroot: &'env Path,
+    out_dir: &'env Path,
+) {
+    // TYPES
+    s.spawn(|| {
+        builder()
+            .header("fetch.h")
+            .clang_arg(format!("--sysroot={}", sysroot.display()))
+            .clang_arg("-fvisibility=default")
+            .clang_arg("--target=wasm32-emscripten")
+            .default_enum_style(bindgen::EnumVariation::Rust {
+                non_exhaustive: true,
+            })
+            .generate_cstr(true)
+            .layout_tests(false)
+            .generate()
+            .unwrap()
+            .write_to_file(out_dir.join("fetch.rs"))
+            .unwrap();
+    });
+
+    // COMPILE
+    s.spawn(|| {
+        cc::Build::new()
+            .file("fetch.cpp")
+            .flag("-fvisibility=default")
+            .flag(format!("--sysroot={}", sysroot.display()))
+            .compile("fetch");
     });
 }

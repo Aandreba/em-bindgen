@@ -1,0 +1,7 @@
+<script type="module">
+	test()
+	async function test() {
+		const resp = await fetch("http://httpbin.org/ip");
+		console.log("ReadableByteStreamController" in globalThis, resp)
+	}
+</script>

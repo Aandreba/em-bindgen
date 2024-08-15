@@ -47,6 +47,39 @@ impl JsValue {
 
 impl JsValue {
     #[inline]
+    pub fn is_undefined(&self) -> bool {
+        self == &JsValue::UNDEFINED
+    }
+
+    #[inline]
+    pub fn is_null(&self) -> bool {
+        self == &JsValue::NULL
+    }
+
+    #[inline]
+    pub fn get(&self, key: impl AsRef<JsValue>) -> JsValue {
+        unsafe {
+            JsValue::take_ownership(_emval_get_property(
+                self.as_handle(),
+                key.as_ref().as_handle(),
+            ))
+        }
+    }
+
+    #[inline]
+    pub fn set(&self, key: impl AsRef<JsValue>, value: impl AsRef<JsValue>) {
+        unsafe {
+            _emval_set_property(
+                self.as_handle(),
+                key.as_ref().as_handle(),
+                value.as_ref().as_handle(),
+            )
+        }
+    }
+}
+
+impl JsValue {
+    #[inline]
     pub fn as_handle(&self) -> EM_VAL {
         return self.handle.as_ptr();
     }
@@ -91,6 +124,13 @@ impl JsValue {
     #[inline]
     fn uses_ref_count(&self) -> bool {
         return self.handle.as_ptr() > _EMVAL_LAST_RESERVED_HANDLE;
+    }
+}
+
+impl AsRef<JsValue> for JsValue {
+    #[inline]
+    fn as_ref(&self) -> &JsValue {
+        self
     }
 }
 
