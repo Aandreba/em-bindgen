@@ -3,15 +3,14 @@ use crate::{
     fetch::sys::{fetch_attrs_t, fetch_status_t, GetResponseBytes, GetResponseChunks, SendRequest},
     value::JsValue,
 };
-use alloc::{alloc::Layout, borrow::Cow, collections::VecDeque};
+use alloc::{alloc::Layout, borrow::Cow};
 use core::{
-    ffi::CStr, hint::unreachable_unchecked, marker::PhantomData, mem::MaybeUninit, task::Poll,
+    ffi::CStr, hint::unreachable_unchecked, marker::PhantomData, num::NonZeroUsize, task::Poll,
     time::Duration,
 };
 use futures::{ready, Future, Stream};
 use http::{Response, StatusCode};
 use libc::c_void;
-use libstd::io::Read;
 use pin_project::pin_project;
 use utils_atomics::channel::once::{async_channel, AsyncReceiver, AsyncSender};
 
@@ -310,9 +309,8 @@ pub enum RequestError {
     Unexpected,
 }
 
-#[pin_project(project = ResponseChunksRecvProj)]
 enum ResponseChunk {
-    Ok(Vec<u8>, #[pin] AsyncReceiver<Self>),
+    Ok(Vec<u8>, AsyncReceiver<Self>),
     Err(RequestError),
 }
 
@@ -332,23 +330,66 @@ impl ResponseReaderBuffer {
                 return self.inner.as_mut_ptr().add(count);
             } else {
                 // Make contiguous, add at the physical back
+                let dest = self.inner.len();
                 let extra = self.tail + len;
+
                 self.inner.reserve(extra);
-                self.inner.set_len(self.inner.len() + extra);
+                self.inner.set_len(dest + extra);
 
-                todo!();
-                self.inner.copy_within(..self.tail, self.head);
-
-                todo!()
+                self.inner.copy_within(..self.tail, dest);
+                let count = self.head + self.tail;
+                self.tail += self.head;
+                return self.inner.as_mut_ptr().add(count);
             }
         } else {
-            // TODO
-            todo!()
+            if self.inner.capacity() >= self.tail + len {
+                // Add at the physical back
+                self.inner.set_len(self.inner.len() + len);
+                let count = self.tail;
+                self.tail += len;
+                return self.inner.as_mut_ptr().add(count);
+            } else if self.head >= len {
+                // Add at the physical front
+                debug_assert_eq!(self.inner.len(), self.tail);
+                self.tail = len;
+                return self.inner.as_mut_ptr();
+            } else {
+                // Allocate extra memory, add at the physical back
+                debug_assert_eq!(self.inner.len(), self.tail);
+                self.inner.reserve(len);
+                self.inner.set_len(self.tail);
+                let count = self.tail;
+                self.tail += len;
+                return self.inner.as_mut_ptr().add(count);
+            }
         }
     }
 
-    fn read(&mut self, buf: &mut [u8]) -> usize {
-        todo!()
+    unsafe fn read(&mut self, buf: &mut [u8]) -> usize {
+        let len = buf.len().min(match self.head > self.tail {
+            true => self.inner.len() + self.tail - self.head,
+            false => self.tail - self.head,
+        });
+
+        if let Some(delta) = (self.head + len)
+            .checked_sub(self.inner.len())
+            .and_then(NonZeroUsize::new)
+        {
+            let delta = delta.get();
+            let midpoint = self.inner.len() - self.head;
+            buf.get_unchecked_mut(..midpoint)
+                .copy_from_slice(&self.inner.get_unchecked(self.head..));
+            buf.get_unchecked_mut(midpoint..midpoint + delta)
+                .copy_from_slice(&self.inner.get_unchecked(..delta));
+            self.head = delta;
+        } else {
+            let new_head = self.head + len;
+            buf.get_unchecked_mut(..len)
+                .copy_from_slice(&self.inner.get_unchecked(self.head..new_head));
+            self.head = new_head;
+        }
+
+        return len;
     }
 }
 
