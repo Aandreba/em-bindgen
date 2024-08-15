@@ -3,13 +3,15 @@ use crate::{
     fetch::sys::{fetch_attrs_t, fetch_status_t, GetResponseBytes, GetResponseChunks, SendRequest},
     value::JsValue,
 };
-use alloc::{alloc::Layout, borrow::Cow};
+use alloc::{alloc::Layout, borrow::Cow, collections::VecDeque};
 use core::{
-    ffi::CStr, hint::unreachable_unchecked, marker::PhantomData, task::Poll, time::Duration,
+    ffi::CStr, hint::unreachable_unchecked, marker::PhantomData, mem::MaybeUninit, task::Poll,
+    time::Duration,
 };
 use futures::{ready, Future, Stream};
 use http::{Response, StatusCode};
 use libc::c_void;
+use libstd::io::Read;
 use pin_project::pin_project;
 use utils_atomics::channel::once::{async_channel, AsyncReceiver, AsyncSender};
 
@@ -211,6 +213,41 @@ impl ResponseBody {
             return ResponseChunks { recv: Some(recv) };
         }
     }
+
+    pub fn reader(self) -> ResponseReader {
+        struct Inner {
+            buffer: Vec<u8>,
+            head: usize,
+            tail: usize,
+        }
+
+        unsafe extern "C" fn on_bytes_pre(len: usize, user_data: *mut c_void) -> *mut u8 {
+            let inner = &mut *user_data.cast::<Inner>();
+            inner.buffer.reserve(len);
+        }
+
+        unsafe extern "C" fn on_bytes_post(
+            status: fetch_status_t,
+            ptr: *mut u8,
+            len: usize,
+            user_data: *mut c_void,
+        ) {
+            let inner = &mut *user_data.cast::<Inner>();
+            todo!()
+        }
+
+        unsafe {
+            let (send, recv) = async_channel::<ResponseChunk>();
+            GetResponseChunks(
+                self.inner.as_handle().cast(),
+                Some(on_bytes_pre),
+                std::ptr::null_mut(),
+                Some(on_bytes_post),
+                Box::into_raw(Box::new(send)).cast(),
+            );
+            todo!()
+        }
+    }
 }
 
 #[pin_project]
@@ -248,6 +285,8 @@ impl Stream for ResponseChunks {
     }
 }
 
+pub struct ResponseReader {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Method {
     GET,
@@ -261,10 +300,56 @@ pub enum Method {
     PATCH,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RequestError {
+    #[error("{0}")]
+    Http(#[from] http::Error),
+    #[error("The request timed out")]
+    TimedOut,
+    #[error("Unexpected error ocurred")]
+    Unexpected,
+}
+
 #[pin_project(project = ResponseChunksRecvProj)]
 enum ResponseChunk {
     Ok(Vec<u8>, #[pin] AsyncReceiver<Self>),
     Err(RequestError),
+}
+
+struct ResponseReaderBuffer {
+    inner: Vec<u8>,
+    head: usize,
+    tail: usize,
+}
+
+impl ResponseReaderBuffer {
+    unsafe fn append(&mut self, len: usize) -> *mut u8 {
+        if let Some(off) = self.head.checked_sub(self.tail) {
+            if off >= len {
+                // Add at the physical front.
+                let count = self.tail;
+                self.tail += len;
+                return self.inner.as_mut_ptr().add(count);
+            } else {
+                // Make contiguous, add at the physical back
+                let extra = self.tail + len;
+                self.inner.reserve(extra);
+                self.inner.set_len(self.inner.len() + extra);
+
+                todo!();
+                self.inner.copy_within(..self.tail, self.head);
+
+                todo!()
+            }
+        } else {
+            // TODO
+            todo!()
+        }
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> usize {
+        todo!()
+    }
 }
 
 unsafe fn handle_response(
@@ -292,16 +377,6 @@ unsafe fn handle_response(
     return builder
         .body(ResponseBody { inner: response })
         .map_err(RequestError::from);
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum RequestError {
-    #[error("{0}")]
-    Http(#[from] http::Error),
-    #[error("The request timed out")]
-    TimedOut,
-    #[error("Unexpected error ocurred")]
-    Unexpected,
 }
 
 pub mod sys {

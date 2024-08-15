@@ -17,6 +17,7 @@ pub fn main() {
         while let Some(chunk) = chunks.next().await {
             println!("{chunk:?}");
         }
+        println!("Done!");
     });
 
     // assert!(FileDialog::default()

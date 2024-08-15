@@ -124,13 +124,11 @@ void GetResponseChunks(void *handle, fetch_onbytes_pre onbytes_pre,
           try {
             while (true) {
               const {done, value : bytes} = await reader.read();
-
               if (done) {
                 onbytes_post($3, 3, 0, 0, $4);
                 break;
               }
 
-              console.log({done, bytes});
               const dst = Module.ccall("_INTERNAL_ON_BYTES_PRE", "number",
                                        [ "number", "number", "number" ],
                                        [ $1, bytes.byteLength, $2 ]);
