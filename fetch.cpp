@@ -132,8 +132,12 @@ void GetResponseChunks(void *handle, fetch_onbytes_pre onbytes_pre,
               const dst = Module.ccall("_INTERNAL_ON_BYTES_PRE", "number",
                                        [ "number", "number", "number" ],
                                        [ $1, bytes.byteLength, $2 ]);
-              HEAPU8.subarray(dst, dst + bytes.byteLength).set(bytes);
-              onbytes_post($3, 0, dst, bytes.byteLength, $4);
+              if (dst == 0) {
+                onbytes_post($3, 0, 0, bytes.byteLength, $4);
+              } else {
+                HEAPU8.subarray(dst, dst + bytes.byteLength).set(bytes);
+                onbytes_post($3, 0, dst, bytes.byteLength, $4);
+              }
             }
           } catch (e) {
             reader.cancel();

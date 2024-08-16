@@ -1,5 +1,4 @@
 use em_bindgen::{console::init_with_level, future::block_on, *};
-use futures::StreamExt;
 use log::LevelFilter;
 use std::time::Duration;
 
@@ -7,16 +6,20 @@ pub fn main() {
     init_with_level(LevelFilter::Debug).unwrap();
 
     block_on(async move {
-        let (parts, body) = fetch::get(c"http://httpbin.org/ip")
-            .await
-            .unwrap()
-            .into_parts();
+        let (parts, body) =
+            fetch::get(c"http://httpbin.org/drip?duration=2&numbytes=10&code=200&delay=2")
+                .await
+                .unwrap()
+                .into_parts();
         println!("{parts:#?}");
 
-        let mut chunks = body.chunks();
-        while let Some(chunk) = chunks.next().await {
+        let mut chunks = body.reader();
+        while let chunk @ [_, ..] = chunks.fill_buf().await.unwrap() {
             println!("{chunk:?}");
+            let len = chunk.len();
+            chunks.consume(len);
         }
+
         println!("Done!");
     });
 

@@ -41,6 +41,9 @@ pub mod console;
 #[cfg(feature = "html")]
 #[cfg_attr(docsrs, doc(cfg(feature = "html")))]
 pub mod html;
+// #[cfg(all(feature = "asyncify", feature = "proxying"))]
+// #[cfg_attr(docsrs, doc(cfg(all(feature = "asyncify", feature = "proxying"))))]
+// pub mod sync;
 pub mod utils;
 pub mod value;
 pub mod wget;

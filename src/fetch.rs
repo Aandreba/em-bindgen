@@ -1,16 +1,18 @@
 use self::sys::fetch_header_t;
 use crate::{
     fetch::sys::{fetch_attrs_t, fetch_status_t, GetResponseBytes, GetResponseChunks, SendRequest},
+    future::block_on,
     value::JsValue,
 };
 use alloc::{alloc::Layout, borrow::Cow};
 use core::{
-    ffi::CStr, hint::unreachable_unchecked, marker::PhantomData, num::NonZeroUsize, task::Poll,
-    time::Duration,
+    ffi::CStr, hint::unreachable_unchecked, marker::PhantomData, task::Poll, time::Duration,
 };
-use futures::{ready, Future, Stream};
+use docfg::docfg;
+use futures::{ready, Future, Stream, StreamExt};
 use http::{Response, StatusCode};
 use libc::c_void;
+use libstd::io::{BufRead, Cursor, ErrorKind, Read};
 use pin_project::pin_project;
 use utils_atomics::channel::once::{async_channel, AsyncReceiver, AsyncSender};
 
@@ -213,39 +215,9 @@ impl ResponseBody {
         }
     }
 
+    #[inline]
     pub fn reader(self) -> ResponseReader {
-        struct Inner {
-            buffer: Vec<u8>,
-            head: usize,
-            tail: usize,
-        }
-
-        unsafe extern "C" fn on_bytes_pre(len: usize, user_data: *mut c_void) -> *mut u8 {
-            let inner = &mut *user_data.cast::<Inner>();
-            inner.buffer.reserve(len);
-        }
-
-        unsafe extern "C" fn on_bytes_post(
-            status: fetch_status_t,
-            ptr: *mut u8,
-            len: usize,
-            user_data: *mut c_void,
-        ) {
-            let inner = &mut *user_data.cast::<Inner>();
-            todo!()
-        }
-
-        unsafe {
-            let (send, recv) = async_channel::<ResponseChunk>();
-            GetResponseChunks(
-                self.inner.as_handle().cast(),
-                Some(on_bytes_pre),
-                std::ptr::null_mut(),
-                Some(on_bytes_post),
-                Box::into_raw(Box::new(send)).cast(),
-            );
-            todo!()
-        }
+        ResponseReader::new(self.chunks())
     }
 }
 
@@ -284,7 +256,76 @@ impl Stream for ResponseChunks {
     }
 }
 
-pub struct ResponseReader {}
+pub struct ResponseReader {
+    chunks: ResponseChunks,
+    buffer: Option<Cursor<Vec<u8>>>,
+}
+
+impl ResponseReader {
+    pub fn new(chunks: ResponseChunks) -> Self {
+        Self {
+            chunks,
+            buffer: None,
+        }
+    }
+
+    pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize, RequestError> {
+        let mut len = 0;
+
+        while len < buf.len() {
+            // Read from the buffers
+            if let Some(cursor) = self.buffer.as_mut() {
+                len += cursor.read(&mut buf[len..])?;
+                if cursor_is_empty(cursor) {
+                    self.buffer = self.chunks.next().await.transpose()?.map(Cursor::new);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        return Ok(len);
+    }
+
+    pub async fn fill_buf(&mut self) -> Result<&[u8], RequestError> {
+        if !self.buffer.as_ref().is_some_and(|x| !cursor_is_empty(x)) {
+            self.buffer = self.chunks.next().await.transpose()?.map(Cursor::new);
+        }
+
+        match self.buffer.as_mut() {
+            Some(cursor) => cursor.fill_buf().map_err(RequestError::from),
+            None => Ok(b""),
+        }
+    }
+
+    #[inline]
+    pub fn consume(&mut self, amt: usize) {
+        if let Some(cursor) = self.buffer.as_mut() {
+            cursor.consume(amt);
+        }
+    }
+}
+
+#[docfg(all(feature = "asyncify", feature = "proxying"))]
+impl std::io::Read for ResponseReader {
+    #[inline]
+    fn read(&mut self, buf: &mut [u8]) -> libstd::io::Result<usize> {
+        block_on(self.read(buf)).map_err(std::io::Error::from)
+    }
+}
+
+#[docfg(all(feature = "asyncify", feature = "proxying"))]
+impl std::io::BufRead for ResponseReader {
+    #[inline]
+    fn fill_buf(&mut self) -> libstd::io::Result<&[u8]> {
+        block_on(self.fill_buf()).map_err(std::io::Error::from)
+    }
+
+    #[inline]
+    fn consume(&mut self, amt: usize) {
+        self.consume(amt)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Method {
@@ -302,6 +343,8 @@ pub enum Method {
 #[derive(Debug, thiserror::Error)]
 pub enum RequestError {
     #[error("{0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
     Http(#[from] http::Error),
     #[error("The request timed out")]
     TimedOut,
@@ -309,88 +352,20 @@ pub enum RequestError {
     Unexpected,
 }
 
+impl From<RequestError> for std::io::Error {
+    fn from(value: RequestError) -> Self {
+        return match value {
+            RequestError::Io(e) => e,
+            RequestError::Http(e) => std::io::Error::new(ErrorKind::Other, e),
+            RequestError::TimedOut => std::io::Error::from(ErrorKind::TimedOut),
+            RequestError::Unexpected => std::io::Error::from(ErrorKind::Other),
+        };
+    }
+}
+
 enum ResponseChunk {
     Ok(Vec<u8>, AsyncReceiver<Self>),
     Err(RequestError),
-}
-
-struct ResponseReaderBuffer {
-    inner: Vec<u8>,
-    head: usize,
-    tail: usize,
-}
-
-impl ResponseReaderBuffer {
-    unsafe fn append(&mut self, len: usize) -> *mut u8 {
-        if let Some(off) = self.head.checked_sub(self.tail) {
-            if off >= len {
-                // Add at the physical front.
-                let count = self.tail;
-                self.tail += len;
-                return self.inner.as_mut_ptr().add(count);
-            } else {
-                // Make contiguous, add at the physical back
-                let dest = self.inner.len();
-                let extra = self.tail + len;
-
-                self.inner.reserve(extra);
-                self.inner.set_len(dest + extra);
-
-                self.inner.copy_within(..self.tail, dest);
-                let count = self.head + self.tail;
-                self.tail += self.head;
-                return self.inner.as_mut_ptr().add(count);
-            }
-        } else {
-            if self.inner.capacity() >= self.tail + len {
-                // Add at the physical back
-                self.inner.set_len(self.inner.len() + len);
-                let count = self.tail;
-                self.tail += len;
-                return self.inner.as_mut_ptr().add(count);
-            } else if self.head >= len {
-                // Add at the physical front
-                debug_assert_eq!(self.inner.len(), self.tail);
-                self.tail = len;
-                return self.inner.as_mut_ptr();
-            } else {
-                // Allocate extra memory, add at the physical back
-                debug_assert_eq!(self.inner.len(), self.tail);
-                self.inner.reserve(len);
-                self.inner.set_len(self.tail);
-                let count = self.tail;
-                self.tail += len;
-                return self.inner.as_mut_ptr().add(count);
-            }
-        }
-    }
-
-    unsafe fn read(&mut self, buf: &mut [u8]) -> usize {
-        let len = buf.len().min(match self.head > self.tail {
-            true => self.inner.len() + self.tail - self.head,
-            false => self.tail - self.head,
-        });
-
-        if let Some(delta) = (self.head + len)
-            .checked_sub(self.inner.len())
-            .and_then(NonZeroUsize::new)
-        {
-            let delta = delta.get();
-            let midpoint = self.inner.len() - self.head;
-            buf.get_unchecked_mut(..midpoint)
-                .copy_from_slice(&self.inner.get_unchecked(self.head..));
-            buf.get_unchecked_mut(midpoint..midpoint + delta)
-                .copy_from_slice(&self.inner.get_unchecked(..delta));
-            self.head = delta;
-        } else {
-            let new_head = self.head + len;
-            buf.get_unchecked_mut(..len)
-                .copy_from_slice(&self.inner.get_unchecked(self.head..new_head));
-            self.head = new_head;
-        }
-
-        return len;
-    }
 }
 
 unsafe fn handle_response(
@@ -418,6 +393,11 @@ unsafe fn handle_response(
     return builder
         .body(ResponseBody { inner: response })
         .map_err(RequestError::from);
+}
+
+#[inline]
+fn cursor_is_empty(cursor: &Cursor<Vec<u8>>) -> bool {
+    return cursor.position() >= cursor.get_ref().len() as u64;
 }
 
 pub mod sys {
