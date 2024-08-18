@@ -37,6 +37,11 @@ impl<'a> Builder<'a> {
         };
     }
 
+    pub fn timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
     pub fn header(&mut self, key: &'a CStr, value: &'a CStr) -> &mut Self {
         self.headers.push(fetch_header_t {
             key: key.as_ptr(),
